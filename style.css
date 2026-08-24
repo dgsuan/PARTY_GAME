@@ -54,12 +54,7 @@ html, body {
   margin-top: 4px;
   text-transform: uppercase;
 }
-.pvp-tag {
-  color: var(--p2);
-  text-shadow: 0 0 10px rgba(255, 95, 174, 0.6);
-}
-.p1-label { color: var(--p1); font-weight: 700; }
-.p2-label { color: var(--p2); font-weight: 700; }
+
 
 .screen {
   position: relative;
@@ -141,6 +136,79 @@ html, body {
   max-width: 340px;
 }
 
+/* ---------- Main menu ---------- */
+.menu-panel {
+  justify-content: flex-start;
+  padding-top: 6%;
+  gap: 18px;
+}
+.menu-panel h1 { font-size: clamp(20px, 4vw, 30px); }
+
+.menu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  width: 100%;
+  max-width: 560px;
+}
+@media (max-width: 480px) {
+  .menu-grid { grid-template-columns: 1fr; }
+}
+
+.game-card {
+  background: rgba(0,0,0,0.4);
+  border: 1px solid var(--phosphor-dim);
+  border-radius: 8px;
+  padding: 14px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+.game-icon { font-size: 30px; line-height: 1; }
+.game-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--phosphor);
+}
+.game-blurb {
+  font-size: 10.5px;
+  color: #a9c9b6;
+  line-height: 1.4;
+  min-height: 34px;
+}
+.game-play-btn {
+  font-size: 12px;
+  padding: 8px 14px;
+  margin-top: 4px;
+}
+
+/* ---------- Game over ---------- */
+.gameover-lines {
+  font-size: 15px;
+  color: #cfe8d8;
+  line-height: 1.6;
+}
+.gameover-btns {
+  display: flex;
+  gap: 10px;
+}
+
+/* ---------- Quit button (visible during play) ---------- */
+.quit-btn {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  z-index: 6;
+  font-size: 11px;
+  padding: 6px 10px;
+  opacity: 0.75;
+}
+.quit-btn.hidden { display: none; }
+.quit-btn:hover { opacity: 1; }
+
 button {
   font-family: inherit;
   font-size: 15px;
@@ -168,63 +236,6 @@ button:hover {
   animation: spin 0.9s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-
-#hud {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  right: 10px;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  font-size: 13px;
-  letter-spacing: 0.08em;
-  z-index: 4;
-}
-#hud.hidden { display: none; }
-
-.hud-side {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  min-width: 60px;
-  padding: 4px 10px;
-  border-radius: 4px;
-  background: rgba(0,0,0,0.35);
-}
-.hud-label {
-  font-size: 11px;
-  letter-spacing: 0.15em;
-  opacity: 0.85;
-}
-.hud-score {
-  font-size: 22px;
-  font-weight: 700;
-}
-.p1-side { color: var(--p1); text-shadow: 0 0 8px rgba(53,255,143,0.7); }
-.p2-side { color: var(--p2); text-shadow: 0 0 8px rgba(255,95,174,0.7); }
-
-.hud-timer {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--amber);
-  text-shadow: 0 0 8px rgba(255,176,32,0.7);
-  padding-top: 6px;
-}
-
-.final-scores {
-  display: flex;
-  gap: 28px;
-  font-size: 15px;
-}
-.final-score-block {
-  text-align: center;
-  line-height: 1.4;
-}
-.final-score-block span {
-  font-size: 30px;
-  display: block;
-}
 
 .control-strip {
   display: flex;

@@ -1,4 +1,5 @@
 // ============================================================
+<<<<<<< Updated upstream
 // SIGNAL POP — PvP — a motion-tracked local 2-player arcade game
 //
 // Pipeline (same as single-player, just two tracked hands now):
@@ -10,23 +11,64 @@
 //   5. Canvas 2D                 -> render bubbles/bombs + divider + cursors
 //
 // Everything below runs client-side. No server, no build step.
+=======
+// SIGNAL ARCADE — app shell
+//
+// This file owns everything that's the same across every game:
+// the main menu, camera access, loading the right ML model, and
+// running the per-frame loop. Each individual game only implements
+// a small contract (see games/*.js) — that's what makes adding a
+// new game later just "write one file + add it to GAMES below".
+//
+// Game module contract (see games/signalPop.js for a full example):
+//   id, title, icon, blurb   -> shown on the menu card
+//   mode: "hand" | "pose"    -> which tracking model this game needs
+//   numHands (if mode="hand")-> 1 or 2
+//   init({canvas, ctx, video})
+//   onResults(results)       -> hand: array of hands' 21 landmarks
+//                                pose: single pose's 33 landmarks (or null)
+//   update(dt)
+//   draw(ctx)
+//   isOver()  -> boolean
+//   getSummary() -> { title, color, lines: [] }
+>>>>>>> Stashed changes
 // ============================================================
 
 import {
   HandLandmarker,
+<<<<<<< Updated upstream
   FilesetResolver,
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
+=======
+  PoseLandmarker,
+  FilesetResolver,
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+import { createSignalPop } from "./games/signalPop.js";
+import { createWhackAMole } from "./games/whackAMole.js";
+import { createCopyPose } from "./games/copyPose.js";
+import { createIceBreaker } from "./games/iceBreaker.js";
+
+const GAMES = [createSignalPop, createWhackAMole, createCopyPose, createIceBreaker];
+
+>>>>>>> Stashed changes
 // ---------- DOM ----------
 const video = document.getElementById("webcam");
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
+<<<<<<< Updated upstream
 const startScreen = document.getElementById("startScreen");
+=======
+const menuScreen = document.getElementById("menuScreen");
+const menuGrid = document.getElementById("menuGrid");
+>>>>>>> Stashed changes
 const errorScreen = document.getElementById("errorScreen");
 const loadingScreen = document.getElementById("loadingScreen");
 const gameOverScreen = document.getElementById("gameOverScreen");
 const errorMsg = document.getElementById("errorMsg");
+<<<<<<< Updated upstream
 const hud = document.getElementById("hud");
 const score1El = document.getElementById("score1");
 const score2El = document.getElementById("score2");
@@ -58,12 +100,50 @@ const BUBBLE_MAX_R = 38;
 const SPAWN_EVERY_MS = 550;
 const BOMB_CHANCE = 0.22; // ~1 in 4-5 spawns is a bomb
 const BOMB_PENALTY = 5;
+=======
+const quitBtn = document.getElementById("quitBtn");
+const gameOverTitle = document.getElementById("gameOverTitle");
+const gameOverLines = document.getElementById("gameOverLines");
+
+document.getElementById("retryBtn").addEventListener("click", () => startSelected());
+document.getElementById("replayBtn").addEventListener("click", () => startSelected());
+document.getElementById("menuBtn").addEventListener("click", returnToMenu);
+quitBtn.addEventListener("click", returnToMenu);
+
+// ---------- Build the menu from the GAMES registry ----------
+let selectedFactory = null;
+
+for (const factory of GAMES) {
+  const meta = factory(); // throwaway instance just to read metadata
+  const card = document.createElement("div");
+  card.className = "game-card";
+  card.innerHTML = `
+    <div class="game-icon">${meta.icon}</div>
+    <div class="game-title">${meta.title}</div>
+    <div class="game-blurb">${meta.blurb}</div>
+    <button class="game-play-btn">▶ PLAY</button>
+  `;
+  card.querySelector(".game-play-btn").addEventListener("click", () => {
+    selectedFactory = factory;
+    startSelected();
+  });
+  menuGrid.appendChild(card);
+}
+>>>>>>> Stashed changes
 
 function show(el) { el.classList.remove("hidden"); }
 function hide(el) { el.classList.add("hidden"); }
 
+<<<<<<< Updated upstream
 // ---------- Step 1: model loading (once) ----------
 async function loadModel() {
+=======
+// ---------- Model caches (loaded lazily, reused across games) ----------
+let handLandmarker = null;
+let poseLandmarker = null;
+
+async function getHandLandmarker() {
+>>>>>>> Stashed changes
   if (handLandmarker) return handLandmarker;
   const vision = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
@@ -75,11 +155,16 @@ async function loadModel() {
       delegate: "GPU",
     },
     runningMode: "VIDEO",
+<<<<<<< Updated upstream
     numHands: 2, // one per player
+=======
+    numHands: 2,
+>>>>>>> Stashed changes
   });
   return handLandmarker;
 }
 
+<<<<<<< Updated upstream
 // ---------- Step 2: camera ----------
 async function startCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
@@ -87,16 +172,53 @@ async function startCamera() {
     audio: false,
   });
   video.srcObject = stream;
+=======
+async function getPoseLandmarker() {
+  if (poseLandmarker) return poseLandmarker;
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+  poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+      delegate: "GPU",
+    },
+    runningMode: "VIDEO",
+    numPoses: 1,
+  });
+  return poseLandmarker;
+}
+
+// ---------- Camera ----------
+let cameraStream = null;
+
+async function startCamera() {
+  cameraStream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "user", width: 960, height: 540 },
+    audio: false,
+  });
+  video.srcObject = cameraStream;
+>>>>>>> Stashed changes
   await new Promise((resolve) => (video.onloadedmetadata = resolve));
   video.play();
 }
 
+<<<<<<< Updated upstream
+=======
+function stopCamera() {
+  cameraStream?.getTracks().forEach((t) => t.stop());
+  cameraStream = null;
+}
+
+>>>>>>> Stashed changes
 function resizeCanvasToScreen() {
   const rect = canvas.parentElement.getBoundingClientRect();
   canvas.width = rect.width;
   canvas.height = rect.height;
 }
 
+<<<<<<< Updated upstream
 // ---------- Full flow ----------
 async function startGame() {
   hide(startScreen);
@@ -107,6 +229,27 @@ async function startGame() {
   try {
     await startCamera();
     await loadModel();
+=======
+// ---------- Game lifecycle ----------
+let currentGame = null;
+let running = false;
+
+async function startSelected() {
+  if (!selectedFactory) return;
+
+  hide(menuScreen);
+  hide(errorScreen);
+  hide(gameOverScreen);
+  hide(quitBtn);
+  show(loadingScreen);
+
+  currentGame = selectedFactory();
+
+  try {
+    await startCamera();
+    if (currentGame.mode === "pose") await getPoseLandmarker();
+    else await getHandLandmarker();
+>>>>>>> Stashed changes
   } catch (err) {
     console.error(err);
     hide(loadingScreen);
@@ -119,6 +262,7 @@ async function startGame() {
   }
 
   resizeCanvasToScreen();
+<<<<<<< Updated upstream
   hide(loadingScreen);
   show(hud);
 
@@ -345,6 +489,56 @@ function drawCursor(pt, color) {
   ctx.restore();
 }
 
+=======
+  currentGame.init({ canvas, ctx, video });
+
+  hide(loadingScreen);
+  show(quitBtn);
+  running = true;
+  lastFrameTime = performance.now();
+  requestAnimationFrame(gameLoop);
+}
+
+function endCurrentGame() {
+  running = false;
+  stopCamera();
+  hide(quitBtn);
+
+  const summary = currentGame.getSummary();
+  gameOverTitle.textContent = summary.title;
+  gameOverTitle.style.color = summary.color || "";
+  gameOverLines.innerHTML = summary.lines.map((l) => `<div>${l}</div>`).join("");
+  show(gameOverScreen);
+}
+
+function returnToMenu() {
+  running = false;
+  stopCamera();
+  hide(quitBtn);
+  hide(gameOverScreen);
+  hide(errorScreen);
+  hide(loadingScreen);
+  currentGame = null;
+  selectedFactory = null;
+  show(menuScreen);
+}
+
+// ---------- Per-frame tracking dispatch ----------
+function detect(timestampMs) {
+  if (video.readyState < 2) return;
+
+  if (currentGame.mode === "pose") {
+    if (!poseLandmarker) return;
+    const result = poseLandmarker.detectForVideo(video, timestampMs);
+    currentGame.onResults(result.landmarks && result.landmarks[0] ? result.landmarks[0] : null);
+  } else {
+    if (!handLandmarker) return;
+    const result = handLandmarker.detectForVideo(video, timestampMs);
+    currentGame.onResults(result.landmarks || []);
+  }
+}
+
+>>>>>>> Stashed changes
 // ---------- Main loop ----------
 let lastFrameTime = performance.now();
 function gameLoop(now) {
@@ -352,10 +546,21 @@ function gameLoop(now) {
   const dt = Math.min((now - lastFrameTime) / 1000, 0.05);
   lastFrameTime = now;
 
+<<<<<<< Updated upstream
   detectHands(now);
   updateBubbles(dt);
   draw();
 
+=======
+  detect(now);
+  currentGame.update(dt);
+  currentGame.draw(ctx);
+
+  if (currentGame.isOver()) {
+    endCurrentGame();
+    return;
+  }
+>>>>>>> Stashed changes
   requestAnimationFrame(gameLoop);
 }
 

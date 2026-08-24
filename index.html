@@ -3,27 +3,41 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<<<<<<< Updated upstream
 <title>SIGNAL POP — Motion Arcade PvP</title>
+=======
+<title>Signal Arcade — Motion-Tracked Games</title>
+>>>>>>> Stashed changes
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
   <div class="cabinet">
     <div class="marquee">
+<<<<<<< Updated upstream
       <span class="marquee-text">SIGNAL // POP <span class="pvp-tag">— PVP</span></span>
       <span class="marquee-sub">1v1 · one camera · one screen, split down the middle</span>
+=======
+      <span class="marquee-text">SIGNAL ARCADE</span>
+      <span class="marquee-sub">motion-tracked games · just you and your camera</span>
+>>>>>>> Stashed changes
     </div>
 
     <div class="screen">
       <!-- raw camera feed, mirrored, drawn behind the game canvas -->
       <video id="webcam" autoplay playsinline muted></video>
 
+<<<<<<< Updated upstream
       <!-- everything the player sees: bubbles, bombs, divider, hand cursors -->
+=======
+      <!-- everything the current game draws: targets, cursors, HUD -->
+>>>>>>> Stashed changes
       <canvas id="game"></canvas>
 
       <!-- scanline / vignette overlay for the arcade-monitor feel -->
       <div class="crt-overlay"></div>
 
+<<<<<<< Updated upstream
       <!-- pre-game / status screens -->
       <div id="startScreen" class="overlay-panel">
         <h1>SIGNAL POP</h1>
@@ -37,6 +51,16 @@
         <p class="fine-print">Runs entirely in your browser. Nothing is uploaded — the model runs on-device.</p>
       </div>
 
+=======
+      <!-- ============ MAIN MENU ============ -->
+      <div id="menuScreen" class="overlay-panel menu-panel">
+        <h1>CHOOSE YOUR GAME</h1>
+        <div id="menuGrid" class="menu-grid"><!-- cards injected by main.js --></div>
+        <p class="fine-print">Runs entirely in your browser. Nothing is uploaded — tracking happens on-device.</p>
+      </div>
+
+      <!-- ============ GENERIC STATUS SCREENS ============ -->
+>>>>>>> Stashed changes
       <div id="errorScreen" class="overlay-panel hidden">
         <h1>NO SIGNAL</h1>
         <p id="errorMsg">Camera access was blocked or unavailable.</p>
@@ -45,6 +69,7 @@
 
       <div id="loadingScreen" class="overlay-panel hidden">
         <div class="spinner"></div>
+<<<<<<< Updated upstream
         <p>Loading hand-tracking model…</p>
       </div>
 
@@ -70,6 +95,22 @@
         </div>
         <button id="replayBtn">↻ PLAY AGAIN</button>
       </div>
+=======
+        <p>Loading tracking model…</p>
+      </div>
+
+      <div id="gameOverScreen" class="overlay-panel hidden">
+        <h1 id="gameOverTitle">GAME OVER</h1>
+        <div id="gameOverLines" class="gameover-lines"></div>
+        <div class="gameover-btns">
+          <button id="replayBtn">↻ PLAY AGAIN</button>
+          <button id="menuBtn">☰ MAIN MENU</button>
+        </div>
+      </div>
+
+      <!-- visible only during active gameplay -->
+      <button id="quitBtn" class="quit-btn hidden">☰ MENU</button>
+>>>>>>> Stashed changes
     </div>
 
     <div class="control-strip">

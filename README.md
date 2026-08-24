@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 # Signal Pop — Motion-Tracked Arcade Game (Web, Local PvP)
 
 A working example of an "Active Arcade"–style game: your webcam becomes the
@@ -116,30 +117,174 @@ No `package.json`, no `node_modules` — it's plain static files.
 Because `getUserMedia` needs `https://` or `localhost`, don't just
 double-click `index.html`. Serve it:
 
+=======
+# Signal Arcade — Motion-Tracked Web Games
+
+A browser-based arcade with a main menu and four camera-controlled games.
+No mouse, no gamepad — your hands (and body, for one game) are the
+controller. Everything runs on-device via MediaPipe, so it deploys as a
+static site with no backend.
+
+## The games
+
+| Game | Players | Tracking | How it works |
+|---|---|---|---|
+| **Signal Pop** | 2 (split screen) | 2 hands | Pop rising signals on your half for points; red bombs cost 5 points. Most points when the 30s timer ends wins. |
+| **Whack-a-Mole** | 1 (uses both hands) | 2 hands | Moles pop up across a grid; whack them with either hand before they duck back down. Score as many as you can in 30s. |
+| **Copy the Pose** | 1 | full body | A wall slides toward you showing a pose (arms up, T-pose, etc). Match it with your body to push it back and score. Miss 3 times and it's over — the wall gets faster every round. |
+| **Ice Breaker** | 2 (split screen) | 2 hands | Hands become hammers. Smash every ice block on your half before your opponent smashes theirs. |
+
+## Is this actually possible?
+
+Yes — three browser-native pieces make it work in every modern browser:
+
+1. **`getUserMedia()`** — grabs the camera feed into a `<video>` element.
+2. **An in-browser ML model** — MediaPipe's `HandLandmarker` (21 points
+   per hand) or `PoseLandmarker` (33 body points) runs *on the user's
+   device* via WebAssembly/GPU and returns live keypoints every frame.
+3. **Canvas rendering** — the game is drawn on top of those keypoints,
+   exactly like drawing on top of mouse coordinates.
+
+Nothing touches a server, which is why the whole thing can be a static
+site on Vercel or GitHub Pages.
+
+## Architecture — how the menu/game framework works
+
+```
+index.html + style.css        — shared shell: menu, camera, all overlays
+main.js                       — app orchestrator (see contract below)
+games/
+  ├── utils.js                — shared math/drawing helpers
+  ├── signalPop.js
+  ├── whackAMole.js
+  ├── copyPose.js
+  └── iceBreaker.js
+```
+
+`main.js` owns everything every game needs in common:
+- building the menu grid from a `GAMES` registry
+- starting/stopping the camera
+- loading the right ML model (`HandLandmarker` or `PoseLandmarker`,
+  loaded once and cached — switching games doesn't reload the model
+  unless it needs the *other* tracking type)
+- running the `requestAnimationFrame` loop and feeding each game its
+  landmarks every frame
+- the generic loading / error / game-over screens
+
+Each file in `games/` implements one small, self-contained contract —
+nothing else. `main.js` never has any game-specific logic in it:
+
+```js
+export function createYourGame() {
+  return {
+    id: "yourgame",
+    title: "Your Game",
+    icon: "🎮",
+    blurb: "One line describing it for the menu card",
+    mode: "hand",       // or "pose"
+    numHands: 2,         // only relevant if mode === "hand"
+
+    init({ canvas, ctx, video }) { /* set up state */ },
+
+    onResults(results) {
+      // mode: "hand"  -> results = array of hands, each hand is
+      //                  21 landmarks (MediaPipe hand model)
+      // mode: "pose"  -> results = one pose's 33 landmarks, or null
+    },
+
+    update(dt) { /* advance game state by dt seconds */ },
+    draw(ctx)  { /* render targets, cursors, and your own HUD text */ },
+    isOver()   { return /* boolean */; },
+    getSummary() {
+      return { title: "GAME OVER", color: "#35ff8f", lines: ["Score: 12"] };
+    },
+  };
+}
+```
+
+### Adding a fifth game
+1. Create `games/yourGame.js` following the contract above.
+2. In `main.js`, `import { createYourGame } from "./games/yourGame.js";`
+   and add `createYourGame` to the `GAMES` array.
+
+That's it — the menu card, camera setup, and model loading are all
+handled automatically based on what you declare in `mode`/`numHands`.
+
+## Design notes worth knowing
+
+- **HUD lives on the canvas, not in HTML.** Every game draws its own
+  score/timer/lives text directly with `ctx.fillText` in its `draw()`
+  method. This keeps `index.html` generic — it doesn't need to know
+  what any given game's HUD looks like.
+- **Split-screen games (Signal Pop, Ice Breaker) don't track "left
+  hand" vs "right hand."** They track *which half of the screen* a
+  fingertip is in. Two players standing side by side in front of one
+  camera naturally end up controlling their own half — no calibration
+  step, no handedness detection needed.
+- **Copy the Pose's pose-matching is heuristic, not exact.** It compares
+  relative landmark positions (e.g. "both wrists above both shoulders"
+  for ARMS UP) rather than precise joint angles. That's intentionally
+  forgiving — exact angle-matching would feel unresponsive on a wide
+  range of camera angles and body types.
+- **Mirroring**: video is mirrored with CSS (`scaleX(-1)`) so it feels
+  like a mirror. Every game flips landmark x-coordinates
+  (`toCanvasPoint` in `utils.js`) to match — this is already handled,
+  you don't need to think about it when adding a new hand/pose game.
+
+## Gotchas
+
+- **HTTPS required**: `getUserMedia()` only works on `https://` or
+  `localhost`. Vercel and GitHub Pages both serve over HTTPS, so
+  production is fine — just don't open `index.html` via `file://`.
+- **Permissions need a user gesture**: that's why camera access only
+  starts after clicking a game's Play button, not on page load.
+- **First play per tracking type loads a model** (a few MB from
+  Google's CDN) — the loading screen covers that gap. Switching
+  between two hand-tracking games (e.g. Signal Pop → Whack-a-Mole)
+  reuses the already-loaded model; switching to Copy the Pose loads
+  the pose model the first time only.
+
+## Run it locally
+
+>>>>>>> Stashed changes
 ```bash
 cd motion-arcade
 python3 -m http.server 8000
 # open http://localhost:8000
 ```
+<<<<<<< Updated upstream
 
 or with Node: `npx serve .`
+=======
+(or `npx serve .`)
+>>>>>>> Stashed changes
 
 ## Deploy to GitHub Pages
 
 ```bash
 git init
 git add .
+<<<<<<< Updated upstream
 git commit -m "Signal Pop motion arcade game"
+=======
+git commit -m "Signal Arcade"
+>>>>>>> Stashed changes
 git branch -M main
 git remote add origin https://github.com/<you>/<repo>.git
 git push -u origin main
 ```
+<<<<<<< Updated upstream
 Then in the repo: **Settings → Pages → Deploy from branch → main / root**.
 Your game will be live at `https://<you>.github.io/<repo>/`.
+=======
+Repo → **Settings → Pages → Deploy from branch → main / root**. Live at
+`https://<you>.github.io/<repo>/`.
+>>>>>>> Stashed changes
 
 ## Deploy to Vercel
 
 ```bash
+<<<<<<< Updated upstream
 npm i -g vercel   # one-time
 cd motion-arcade
 vercel
@@ -183,3 +328,21 @@ regular green ones 1 point (see `updateBubbles()`).
   (Supabase, Firebase, or a simple serverless function on Vercel) only
   if/when you want persistent scores — the local PvP game itself doesn't
   need one.
+=======
+npm i -g vercel
+cd motion-arcade
+vercel
+```
+No build step — Vercel detects it as static and deploys as-is. Or
+connect the GitHub repo in the Vercel dashboard for auto-deploys.
+
+## Tuning each game
+
+All the gameplay constants live at the top of each game file:
+
+- `games/signalPop.js` — `BOMB_CHANCE`, `BOMB_PENALTY`, `MATCH_TIME`
+- `games/whackAMole.js` — `MOLE_UP_MS`, `MAX_ACTIVE`, grid size
+- `games/copyPose.js` — `START_SPEED`, `SPEED_STEP`, `HOLD_TIME`, and
+  the `POSES` array (add/remove poses here)
+- `games/iceBreaker.js` — `COLS_PER_SIDE`, `ROWS`, `MAX_TIME`
+>>>>>>> Stashed changes
