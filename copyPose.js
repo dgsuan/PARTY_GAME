@@ -93,11 +93,25 @@ export function createCopyPose() {
     onResults(poses) {
       this.players[0].landmarks = null;
       this.players[1].landmarks = null;
-      for (const pose of poses) {
-        const nose = pose[IDX.nose];
-        const side = (1 - nose.x) < 0.5 ? 0 : 1;
-        this.players[side].landmarks = pose;
+
+      const detected = poses
+        .filter((pose) => pose[IDX.ls] && pose[IDX.rs] && pose[IDX.lh] && pose[IDX.rh])
+        .sort((first, second) => this.poseCenter(first) - this.poseCenter(second));
+
+      if (detected.length === 1) {
+        const side = this.poseCenter(detected[0]) < 0.5 ? 0 : 1;
+        this.players[side].landmarks = detected[0];
+      } else {
+        for (const [index, pose] of detected.slice(0, 2).entries()) {
+          this.players[index].landmarks = pose;
+        }
       }
+    },
+
+    poseCenter(pose) {
+      const shoulderCenter = (pose[IDX.ls].x + pose[IDX.rs].x) / 2;
+      const hipCenter = (pose[IDX.lh].x + pose[IDX.rh].x) / 2;
+      return 1 - (shoulderCenter + hipCenter) / 2;
     },
 
     getPoints(lm) {

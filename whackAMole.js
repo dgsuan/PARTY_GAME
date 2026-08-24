@@ -1,4 +1,4 @@
-import { toCanvasPoint, dist } from "./utils.js";
+import { toCanvasPoint, dist, drawHammer } from "./utils.js";
 
 const COLS = 4;
 const ROWS = 3;
@@ -139,16 +139,7 @@ export function createWhackAMole() {
 
       for (const [side, handPoints] of this.hands.entries()) {
         for (const tip of handPoints) {
-        ctx.save();
-        ctx.translate(tip.x, tip.y);
-        ctx.rotate(-0.4);
-        ctx.fillStyle = "#8a5a2b";
-        ctx.fillRect(-4, -6, 8, 40);
-        ctx.fillStyle = "#35ff8f";
-        ctx.shadowColor = "#35ff8f";
-        ctx.shadowBlur = 10;
-        ctx.fillRect(-20, -28, 40, 22);
-        ctx.restore();
+          drawHammer(ctx, tip.x, tip.y, side === 0 ? "#35ff8f" : "#ff5fae");
         }
       }
 
@@ -160,8 +151,8 @@ export function createWhackAMole() {
       ctx.shadowColor = "#35ff8f";
       ctx.textAlign = "left";
       ctx.fillText(`P1 ${this.scores[0]}`, 12, 10);
-      ctx.fillStyle = "#ffb020";
-      ctx.shadowColor = "#ffb020";
+      ctx.fillStyle = "#ff5fae";
+      ctx.shadowColor = "#ff5fae";
       ctx.textAlign = "right";
       ctx.fillText(`${this.scores[1]} P2  ${this.timeLeft.toFixed(0)}`, canvas.width - 12, 10);
       ctx.restore();

@@ -15,17 +15,19 @@
 
 html, body {
   margin: 0;
-  height: 100%;
+  min-height: 100%;
   background: var(--bg);
   color: var(--phosphor);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .cabinet {
   width: min(96vw, 900px);
+  margin: clamp(10px, 4vh, 28px) auto;
   background: linear-gradient(180deg, #1e2114, #0f120b);
   border-radius: 18px;
   padding: 18px 18px 10px;
@@ -141,7 +143,24 @@ html, body {
   justify-content: flex-start;
   padding-top: 6%;
   gap: 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--phosphor-dim) rgba(0, 0, 0, 0.35);
 }
+.menu-panel::-webkit-scrollbar { width: 8px; }
+.menu-panel::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+}
+.menu-panel::-webkit-scrollbar-thumb {
+  background: var(--phosphor-dim);
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background-clip: padding-box;
+}
+.menu-panel::-webkit-scrollbar-thumb:hover { background: var(--phosphor); }
 .menu-panel h1 { font-size: clamp(20px, 4vw, 30px); }
 
 .menu-grid {
@@ -255,4 +274,63 @@ button:hover {
 
 @media (max-width: 480px) {
   .overlay-panel p { font-size: 13px; }
+}
+
+@media (max-width: 600px) {
+  .cabinet {
+    width: calc(100vw - 20px);
+    margin-top: max(10px, env(safe-area-inset-top));
+  }
+
+  .screen {
+    height: min(70dvh, 620px);
+    aspect-ratio: auto;
+  }
+
+  .menu-panel {
+    padding: 20px 14px;
+  }
+}
+
+@media (max-width: 900px) and (orientation: landscape) {
+  html, body {
+    align-items: flex-start;
+  }
+
+  .cabinet {
+    margin-top: max(8px, env(safe-area-inset-top));
+    margin-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
+  .marquee {
+    padding: 2px 0 6px;
+  }
+
+  .marquee-sub {
+    display: none;
+  }
+
+  .screen {
+    height: calc(100dvh - 92px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    min-height: 240px;
+  }
+
+  .menu-panel {
+    padding: 12px 18px;
+    gap: 10px;
+  }
+
+  .menu-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .game-card {
+    padding: 9px 8px;
+    gap: 4px;
+  }
+
+  .game-icon {
+    font-size: 24px;
+  }
 }
