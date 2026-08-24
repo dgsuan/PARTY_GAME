@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SIGNAL POP — Motion Arcade PvP</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="cabinet">
+    <div class="marquee">
+      <span class="marquee-text">SIGNAL // POP <span class="pvp-tag">— PVP</span></span>
+    </div>
+
+    <div class="screen">
+      <!-- raw camera feed, mirrored, drawn behind the game canvas -->
+      <video id="webcam" autoplay playsinline muted></video>
+
+      <!-- everything the player sees: bubbles, bombs, divider, hand cursors -->
+      <canvas id="game"></canvas>
+
+      <!-- scanline / vignette overlay for the arcade-monitor feel -->
+      <div class="crt-overlay"></div>
+
+      <!-- pre-game / status screens -->
+      <div id="startScreen" class="overlay-panel">
+        <h1>SIGNAL POP</h1>
+        <p>
+          Two players, one camera. Stand side by side — <span class="p1-label">P1 on the left</span>,
+          <span class="p2-label">P2 on the right</span>. Pop green/amber signals for points.
+          <strong>Avoid the red bombs — they cost you 5 points.</strong>
+          Most points when time runs out wins.
+        </p>
+        <button id="startBtn">▶ ENABLE CAMERA &amp; PLAY</button>
+      </div>
+
+      <div id="errorScreen" class="overlay-panel hidden">
+        <h1>NO SIGNAL</h1>
+        <p id="errorMsg">Camera access was blocked or unavailable.</p>
+        <button id="retryBtn">↻ TRY AGAIN</button>
+      </div>
+
+      <div id="loadingScreen" class="overlay-panel hidden">
+        <div class="spinner"></div>
+        <p>Loading hand-tracking model…</p>
+      </div>
+
+      <div id="hud" class="hidden">
+        <div class="hud-side p1-side">
+          <span class="hud-label">P1</span>
+          <span class="hud-score" id="score1">0</span>
+        </div>
+        <div class="hud-timer">
+          <span id="timer">30</span>
+        </div>
+        <div class="hud-side p2-side">
+          <span class="hud-label">P2</span>
+          <span class="hud-score" id="score2">0</span>
+        </div>
+      </div>
+
+      <div id="gameOverScreen" class="overlay-panel hidden">
+        <h1 id="winnerText">SESSION OVER</h1>
+        <div class="final-scores">
+          <div class="final-score-block p1-label">P1<br/><span id="finalScore1">0</span></div>
+          <div class="final-score-block p2-label">P2<br/><span id="finalScore2">0</span></div>
+        </div>
+        <button id="replayBtn">↻ PLAY AGAIN</button>
+      </div>
+    </div>
+
+    <div class="control-strip">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+    </div>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
