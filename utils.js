@@ -8,55 +8,17 @@ export function dist(a, b) {
 // MediaPipe landmarks are normalized [0,1] in *unmirrored* camera space.
 // Our video/canvas is mirrored with CSS (scaleX(-1)) so it feels like a
 // mirror. To make a landmark line up with what the player sees, flip x.
-export function toCanvasPoint(landmark, canvas) {
+// `view` is the logical CSS-pixel size of the canvas (see main.js) — never
+// canvas.width, which is in device pixels on HiDPI screens.
+export function toCanvasPoint(landmark, view) {
   return {
-    x: (1 - landmark.x) * canvas.width,
-    y: landmark.y * canvas.height,
+    x: (1 - landmark.x) * view.width,
+    y: landmark.y * view.height,
   };
 }
 
 export function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
-}
-
-export function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-export function drawHeart(ctx, x, y, size, filled) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.beginPath();
-  const s = size;
-  ctx.moveTo(0, s * 0.3);
-  ctx.bezierCurveTo(-s, -s * 0.6, -s * 1.6, s * 0.4, 0, s * 1.2);
-  ctx.bezierCurveTo(s * 1.6, s * 0.4, s, -s * 0.6, 0, s * 0.3);
-  ctx.closePath();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "#ff5fae";
-  if (filled) {
-    ctx.fillStyle = "#ff5fae";
-    ctx.fill();
-  }
-  ctx.stroke();
-  ctx.restore();
-}
-
-// Draws a simple cartoon hammer centered at (x, y), rotated slightly,
-// used as the "hands become hammers" cursor in Ice Breaker.
-export function drawHammer(ctx, x, y, color, angle = -0.5) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(angle);
-  // handle
-  ctx.fillStyle = "#8a5a2b";
-  ctx.fillRect(-4, -6, 8, 46);
-  // head
-  ctx.fillStyle = color;
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 10;
-  ctx.fillRect(-22, -30, 44, 26);
-  ctx.restore();
 }
 
 export function pickRandom(arr, exclude) {
@@ -68,7 +30,144 @@ export function pickRandom(arr, exclude) {
   return choice;
 }
 
-export function fmtTime(seconds) {
-  const s = Math.max(0, seconds);
-  return s.toFixed(1);
+// Cartoon hammer used as the "hands become hammers" cursor. `swing` (0-1)
+// drives the wind-up so a strike reads as a strike.
+export function drawHammer(ctx, x, y, color, swing = 0) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(-0.5 + swing * 0.9);
+  ctx.fillStyle = "#6b4522";
+  ctx.fillRect(-3.5, -6, 7, 44);
+  ctx.fillStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 12;
+  ctx.fillRect(-21, -29, 42, 25);
+  ctx.fillStyle = "rgba(255,255,255,0.35)";
+  ctx.fillRect(-21, -29, 42, 6);
+  ctx.restore();
+}
+
+/* ── Juice: particles, floating score text, screen shake ───────────── */
+
+export function createFx() {
+  const bits = [];
+  const texts = [];
+
+  return {
+    burst(x, y, color, count = 10, speed = 190) {
+      for (let i = 0; i < count; i++) {
+        const angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
+        const velocity = speed * (0.45 + Math.random() * 0.75);
+        bits.push({
+          x, y,
+          vx: Math.cos(angle) * velocity,
+          vy: Math.sin(angle) * velocity,
+          life: 0,
+          max: 0.34 + Math.random() * 0.3,
+          size: 1.6 + Math.random() * 2.4,
+          color,
+        });
+      }
+    },
+
+    // Angular shards for shattering ice.
+    shards(x, y, color, count = 8) {
+      for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const velocity = 90 + Math.random() * 190;
+        bits.push({
+          x, y,
+          vx: Math.cos(angle) * velocity,
+          vy: Math.sin(angle) * velocity - 40,
+          life: 0,
+          max: 0.4 + Math.random() * 0.35,
+          size: 2 + Math.random() * 3.5,
+          color,
+          shard: true,
+          spin: (Math.random() - 0.5) * 14,
+          angle: Math.random() * Math.PI,
+        });
+      }
+    },
+
+    text(x, y, value, color) {
+      texts.push({ x, y, value, color, life: 0, max: 0.7 });
+    },
+
+    update(dt) {
+      for (const bit of bits) {
+        bit.life += dt;
+        bit.x += bit.vx * dt;
+        bit.y += bit.vy * dt;
+        bit.vy += 520 * dt;              // gravity
+        bit.vx *= 0.98;
+        if (bit.shard) bit.angle += bit.spin * dt;
+      }
+      for (const item of texts) {
+        item.life += dt;
+        item.y -= 46 * dt;
+      }
+      prune(bits);
+      prune(texts);
+    },
+
+    draw(ctx) {
+      for (const bit of bits) {
+        const k = 1 - bit.life / bit.max;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, k);
+        ctx.fillStyle = bit.color;
+        ctx.shadowColor = bit.color;
+        ctx.shadowBlur = 8;
+        if (bit.shard) {
+          ctx.translate(bit.x, bit.y);
+          ctx.rotate(bit.angle);
+          ctx.fillRect(-bit.size, -bit.size * 0.5, bit.size * 2, bit.size);
+        } else {
+          ctx.beginPath();
+          ctx.arc(bit.x, bit.y, bit.size * k + 0.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+      for (const item of texts) {
+        const k = 1 - item.life / item.max;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, k);
+        ctx.font = `700 ${Math.round(17 + k * 5)}px "JetBrains Mono", ui-monospace, monospace`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = item.color;
+        ctx.shadowColor = item.color;
+        ctx.shadowBlur = 12;
+        ctx.fillText(item.value, item.x, item.y);
+        ctx.restore();
+      }
+    },
+
+    clear() {
+      bits.length = 0;
+      texts.length = 0;
+    },
+  };
+}
+
+function prune(list) {
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i].life >= list[i].max) list.splice(i, 1);
+  }
+}
+
+export function createShake() {
+  let amount = 0;
+  return {
+    add(value) { amount = Math.min(16, amount + value); },
+    update(dt) { amount *= Math.exp(-7 * dt); if (amount < 0.05) amount = 0; },
+    apply(ctx) {
+      if (amount === 0) return false;
+      ctx.save();
+      ctx.translate((Math.random() - 0.5) * amount, (Math.random() - 0.5) * amount);
+      return true;
+    },
+  };
 }

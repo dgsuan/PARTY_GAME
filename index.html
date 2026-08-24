@@ -2,46 +2,176 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Signal Arcade - Motion-Tracked Games</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#07070d" />
+<title>Signal Arcade — Motion-Tracked Channel Deck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="cabinet">
-    <div class="marquee">
-      <span class="marquee-text">SIGNAL ARCADE</span>
-      <span class="marquee-sub">motion-tracked games - just you and your camera</span>
+<div class="deck">
+
+  <!-- ── Left rail: identity + machine state ───────────────────────── -->
+  <aside class="rail">
+    <div class="rail-mark">
+      <span class="rail-mark-text">SIGNAL ARCADE</span>
     </div>
-    <div class="screen">
+    <div class="rail-leds" aria-hidden="true">
+      <span class="led" data-led="power"></span>
+      <span class="led" data-led="cam"></span>
+      <span class="led" data-led="track"></span>
+    </div>
+    <div class="rail-serial" aria-hidden="true">SA<br />04<br />CH</div>
+  </aside>
+
+  <!-- ── Stage ─────────────────────────────────────────────────────── -->
+  <main class="stage">
+
+    <header class="stage-head">
+      <div class="head-id">
+        <span id="headChannel" class="head-channel">CH.——</span>
+        <span id="headTitle" class="head-title">CHANNEL SELECT</span>
+      </div>
+      <div class="head-status">
+        <span id="chipCam" class="chip" data-state="off"><i></i>CAMERA</span>
+        <span id="chipTrack" class="chip" data-state="off"><i></i><span id="chipTrackText">NO SUBJECT</span></span>
+        <button id="muteBtn" class="icon-btn" type="button" aria-pressed="false" title="Mute sound (M)">
+          <span class="icon-on">◉</span><span class="icon-off">◎</span>
+        </button>
+        <button id="fullBtn" class="icon-btn" type="button" title="Fullscreen (F)">⤢</button>
+      </div>
+    </header>
+
+    <!-- The screen itself -->
+    <div class="viewport" id="viewport">
       <video id="webcam" autoplay playsinline muted></video>
+      <div class="video-grade" aria-hidden="true"></div>
       <canvas id="game"></canvas>
-      <div class="crt-overlay"></div>
-      <div id="menuScreen" class="overlay-panel menu-panel">
-        <h1>CHOOSE YOUR GAME</h1>
-        <div id="menuGrid" class="menu-grid"></div>
-        <p class="fine-print">Runs entirely in your browser. Nothing is uploaded - tracking happens on-device.</p>
-      </div>
-      <div id="errorScreen" class="overlay-panel hidden">
-        <h1>NO SIGNAL</h1>
-        <p id="errorMsg">Camera access was blocked or unavailable.</p>
-        <button id="retryBtn">&#8635; TRY AGAIN</button>
-      </div>
-      <div id="loadingScreen" class="overlay-panel hidden">
-        <div class="spinner"></div>
-        <p>Loading tracking model...</p>
-      </div>
-      <div id="gameOverScreen" class="overlay-panel hidden">
-        <h1 id="gameOverTitle">GAME OVER</h1>
-        <div id="gameOverLines" class="gameover-lines"></div>
-        <div class="gameover-btns">
-          <button id="replayBtn">&#8635; PLAY AGAIN</button>
-          <button id="menuBtn">&#9776; MAIN MENU</button>
+      <div class="sweep" aria-hidden="true"></div>
+      <div class="grain" aria-hidden="true"></div>
+      <div class="frame-brackets" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+
+      <!-- In-play heads-up display (DOM, so text stays crisp) -->
+      <div id="hud" class="hud hidden" aria-hidden="true">
+        <div class="pod pod-1">
+          <span class="pod-tag">P1</span>
+          <span class="pod-value" id="hudValue1">0</span>
+          <span class="pod-meta" id="hudMeta1"></span>
+          <div class="pod-bar"><i id="hudBar1"></i></div>
+        </div>
+        <div class="pod-center">
+          <div class="dial">
+            <svg viewBox="0 0 44 44" aria-hidden="true">
+              <circle class="dial-track" cx="22" cy="22" r="19"></circle>
+              <circle class="dial-fill" id="dialFill" cx="22" cy="22" r="19"></circle>
+            </svg>
+            <span id="hudCenter" class="dial-value">30</span>
+          </div>
+          <span id="hudCenterLabel" class="pod-meta">TIME</span>
+        </div>
+        <div class="pod pod-2">
+          <span class="pod-tag">P2</span>
+          <span class="pod-value" id="hudValue2">0</span>
+          <span class="pod-meta" id="hudMeta2"></span>
+          <div class="pod-bar"><i id="hudBar2"></i></div>
         </div>
       </div>
-      <button id="quitBtn" class="quit-btn hidden">&#9776; MENU</button>
+
+      <!-- Transient coaching toast -->
+      <div id="toast" class="toast hidden" role="status"></div>
+
+      <!-- ── Overlays ───────────────────────────────────────────── -->
+      <section id="menuScreen" class="panel panel-menu">
+        <div class="panel-head">
+          <h1>CHANNEL SELECT</h1>
+          <p class="sub">Four motion-tracked games. Stand back, use your hands, share the screen.</p>
+        </div>
+        <div id="menuGrid" class="channels" role="group" aria-label="Choose a channel"></div>
+        <p class="fine">
+          <span class="fine-key">◄ ►</span> browse
+          <span class="fine-key">ENTER</span> tune in
+          <span class="fine-key">1–4</span> jump
+          <span class="dot-sep"></span>
+          Runs entirely on-device. No video ever leaves this browser.
+        </p>
+      </section>
+
+      <section id="loadingScreen" class="panel hidden">
+        <div class="boot">
+          <div class="boot-ring"><i></i><i></i><i></i></div>
+          <h2 id="loadingTitle">ESTABLISHING SIGNAL</h2>
+          <ul class="boot-steps">
+            <li id="stepCam" data-state="pending"><b></b>Requesting camera</li>
+            <li id="stepModel" data-state="pending"><b></b>Loading tracking model</li>
+            <li id="stepCal" data-state="pending"><b></b>Calibrating viewport</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="errorScreen" class="panel hidden">
+        <div class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <h1 class="glitch" data-text="NO SIGNAL">NO SIGNAL</h1>
+        <p id="errorMsg">Camera access was blocked or unavailable.</p>
+        <div class="btn-row">
+          <button id="retryBtn" class="btn btn-primary" type="button">↻ TRY AGAIN</button>
+          <button id="errorMenuBtn" class="btn" type="button">☰ CHANNELS</button>
+        </div>
+      </section>
+
+      <section id="countScreen" class="panel panel-count hidden">
+        <div class="count-ring"><span id="countNum">3</span></div>
+        <p id="countHint" class="count-hint">Both players — step into frame</p>
+      </section>
+
+      <section id="pauseScreen" class="panel hidden">
+        <h1>PAUSED</h1>
+        <p>The match is on hold. Nothing is being recorded.</p>
+        <div class="btn-row">
+          <button id="resumeBtn" class="btn btn-primary" type="button">▶ RESUME</button>
+          <button id="pauseMenuBtn" class="btn" type="button">☰ CHANNELS</button>
+        </div>
+      </section>
+
+      <section id="gameOverScreen" class="panel panel-result hidden">
+        <span class="result-kicker">MATCH COMPLETE</span>
+        <h1 id="gameOverTitle">GAME OVER</h1>
+        <div id="gameOverLines" class="result-rows"></div>
+        <div id="recordNote" class="record-note hidden"></div>
+        <div class="btn-row">
+          <button id="replayBtn" class="btn btn-primary" type="button">↻ REMATCH</button>
+          <button id="menuBtn" class="btn" type="button">☰ CHANNELS</button>
+        </div>
+      </section>
+
+      <button id="quitBtn" class="quit-btn hidden" type="button" title="Pause / menu (Esc)">☰ MENU</button>
     </div>
-    <div class="control-strip"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
-  </div>
-  <script type="module" src="main.js"></script>
+
+    <!-- ── Transport: live telemetry, not decoration ──────────────── -->
+    <footer class="transport">
+      <div class="meter" title="Frames per second">
+        <span class="meter-label">FPS</span>
+        <span id="fpsValue" class="meter-value">—</span>
+        <span id="fpsBars" class="meter-bars"></span>
+      </div>
+      <div class="meter">
+        <span class="meter-label">MODE</span>
+        <span id="modeValue" class="meter-value">IDLE</span>
+      </div>
+      <div class="meter">
+        <span class="meter-label">SUBJECTS</span>
+        <span id="subjValue" class="meter-value">0</span>
+      </div>
+      <div class="meter meter-grow">
+        <span class="meter-label">SESSION</span>
+        <span id="clockValue" class="meter-value">00:00</span>
+      </div>
+      <div class="transport-note">ON-DEVICE TRACKING · MEDIAPIPE</div>
+    </footer>
+
+  </main>
+</div>
+<script type="module" src="main.js"></script>
 </body>
 </html>

@@ -1,59 +1,85 @@
-import { toCanvasPoint, dist, drawHammer } from "./utils.js";
+import { toCanvasPoint, dist, drawHammer, createFx, createShake } from "./utils.js";
+import { C, drawDivider } from "./theme.js";
+import { sfx } from "./audio.js";
 
-const COLS = 4;
+const COLS = 4;                 // 2 columns per player
 const ROWS = 3;
 const MATCH_TIME = 30;
-const MOLE_UP_MS = 950;
-const SPAWN_EVERY_MS = 650;
-const MAX_ACTIVE = 3;
+const UP_MS_START = 1000;
+const UP_MS_FLOOR = 520;        // moles duck faster as the match goes on
+const SPAWN_MS_START = 780;
+const SPAWN_MS_FLOOR = 340;
+const MAX_ACTIVE_PER_SIDE = 2;  // per side, so neither player can be starved
+const GOLD_CHANCE = 0.16;
 
 export function createWhackAMole() {
   return {
     id: "whackamole",
     title: "Whack-a-Mole",
     icon: "🔨",
-    blurb: "2 players · whack moles on your side before they duck",
+    blurb: "Your hands become hammers. Flatten every mole on your half.",
+    players: "2P VS",
+    hint: "Both hands up — one player each side",
     mode: "hand",
-    numHands: 2,
+    numHands: 4,                // two players × two hands
 
-    init({ canvas, ctx }) {
-      this.canvas = canvas;
-      this.ctx = ctx;
+    init({ view }) {
+      this.view = view;
       this.scores = [0, 0];
+      this.hits = [0, 0];
+      this.misses = [0, 0];
       this.timeLeft = MATCH_TIME;
-      this.lastSpawn = 0;
+      this.elapsed = 0;
+      this.lastSpawn = [0, 0];
       this.hands = [[], []];
+      this.fx = createFx();
+      this.shake = createShake();
       this.over = false;
+      this.holes = buildHoles(view);
+    },
 
-      this.holes = [];
-      const marginX = canvas.width * 0.1;
-      const marginY = canvas.height * 0.15;
-      const cellW = (canvas.width - marginX * 2) / COLS;
-      const cellH = (canvas.height - marginY * 2) / ROWS;
-      for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
-          this.holes.push({
-            x: marginX + cellW * (c + 0.5),
-            y: marginY + cellH * (r + 0.5),
-            r: Math.min(cellW, cellH) * 0.3,
-            state: "empty", // empty | up | hit
-            stateT: 0,
-          });
-        }
-      }
+    onResize(view) {
+      // Rebuild the grid for the new size, carrying each hole's state across
+      // by index — the layout is deterministic, so indices stay meaningful.
+      const previous = this.holes;
+      this.view = view;
+      this.holes = buildHoles(view);
+      this.holes.forEach((hole, index) => {
+        const old = previous[index];
+        if (!old) return;
+        hole.state = old.state;
+        hole.stateT = old.stateT;
+        hole.gold = old.gold;
+        hole.upFor = old.upFor;
+      });
     },
 
     onResults(hands) {
       this.hands = [[], []];
-      for (const lm of hands) {
-        const point = toCanvasPoint(lm[8], this.canvas);
-        this.hands[point.x < this.canvas.width / 2 ? 0 : 1].push(point);
+      for (const landmarks of hands) {
+        const point = toCanvasPoint(landmarks[8], this.view);
+        // Track the wrist too, so we can tell a swing from a hover.
+        const wrist = toCanvasPoint(landmarks[0], this.view);
+        point.swing = Math.max(0, Math.min(1, (point.y - wrist.y + 60) / 120));
+        this.hands[point.x < this.view.width / 2 ? 0 : 1].push(point);
       }
+    },
+
+    upDuration() {
+      return Math.max(UP_MS_FLOOR, UP_MS_START - this.elapsed * 16);
+    },
+
+    spawnInterval() {
+      return Math.max(SPAWN_MS_FLOOR, SPAWN_MS_START - this.elapsed * 15);
     },
 
     update(dt) {
       if (this.over) return;
+      this.elapsed += dt;
       this.timeLeft -= dt;
+      this.fx.update(dt);
+      this.shake.update(dt);
+
       if (this.timeLeft <= 0) {
         this.timeLeft = 0;
         this.over = true;
@@ -61,101 +87,158 @@ export function createWhackAMole() {
       }
 
       const now = performance.now();
-      const activeCount = this.holes.filter((h) => h.state === "up").length;
-      if (now - this.lastSpawn > SPAWN_EVERY_MS && activeCount < MAX_ACTIVE) {
-        const empties = this.holes.filter((h) => h.state === "empty");
-        if (empties.length > 0) {
-          const hole = empties[Math.floor(Math.random() * empties.length)];
-          hole.state = "up";
-          hole.stateT = 0;
-          this.lastSpawn = now;
-        }
+      const midX = this.view.width / 2;
+
+      // Each side spawns on its own clock and its own budget.
+      for (const side of [0, 1]) {
+        const mine = this.holes.filter((hole) => (hole.x < midX ? 0 : 1) === side);
+        const active = mine.filter((hole) => hole.state === "up").length;
+        if (now - this.lastSpawn[side] < this.spawnInterval() || active >= MAX_ACTIVE_PER_SIDE) continue;
+        const empties = mine.filter((hole) => hole.state === "empty");
+        if (empties.length === 0) continue;
+        const hole = empties[Math.floor(Math.random() * empties.length)];
+        hole.state = "up";
+        hole.stateT = 0;
+        hole.gold = Math.random() < GOLD_CHANCE;
+        hole.upFor = this.upDuration() * (hole.gold ? 0.7 : 1);
+        this.lastSpawn[side] = now;
       }
 
-      for (const h of this.holes) {
-        h.stateT += dt * 1000;
-        if (h.state === "up") {
-          const side = h.x < this.canvas.width / 2 ? 0 : 1;
-          for (const tip of this.hands[side]) {
-            if (dist(tip, h) < h.r + 12) {
-              h.state = "hit";
-              h.stateT = 0;
-              this.scores[side] += 1;
-              break;
-            }
+      for (const hole of this.holes) {
+        hole.stateT += dt * 1000;
+        const side = hole.x < midX ? 0 : 1;
+
+        if (hole.state === "up") {
+          for (const hand of this.hands[side]) {
+            if (dist(hand, hole) > hole.r + 14) continue;
+            const gain = hole.gold ? 3 : 1;
+            hole.state = "hit";
+            hole.stateT = 0;
+            this.scores[side] += gain;
+            this.hits[side] += 1;
+            const color = hole.gold ? C.amber : side === 0 ? C.p1 : C.p2;
+            this.fx.burst(hole.x, hole.y, color, hole.gold ? 16 : 10, hole.gold ? 250 : 180);
+            this.fx.text(hole.x, hole.y - hole.r, `+${gain}`, color);
+            this.shake.add(hole.gold ? 7 : 4);
+            sfx.whack();
+            break;
           }
-          if (h.stateT > MOLE_UP_MS) {
-            h.state = "empty";
-            h.stateT = 0;
+          if (hole.state === "up" && hole.stateT > hole.upFor) {
+            hole.state = "empty";
+            hole.stateT = 0;
+            this.misses[side] += 1;
           }
-        } else if (h.state === "hit" && h.stateT > 220) {
-          h.state = "empty";
-          h.stateT = 0;
+        } else if (hole.state === "hit" && hole.stateT > 240) {
+          hole.state = "empty";
+          hole.stateT = 0;
         }
       }
     },
 
     draw(ctx) {
-      const { canvas } = this;
+      const { view } = this;
+      const shaking = this.shake.apply(ctx);
+      drawDivider(ctx, view, this.elapsed);
 
-      for (const h of this.holes) {
+      for (const hole of this.holes) {
+        const side = hole.x < view.width / 2 ? 0 : 1;
+        const accent = side === 0 ? C.p1 : C.p2;
+
+        // Socket
         ctx.save();
         ctx.beginPath();
-        ctx.ellipse(h.x, h.y + h.r * 0.4, h.r * 1.15, h.r * 0.55, 0, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(0,0,0,0.55)";
+        ctx.ellipse(hole.x, hole.y + hole.r * 0.42, hole.r * 1.12, hole.r * 0.5, 0, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(0, 0, 0, 0.62)";
         ctx.fill();
-        ctx.strokeStyle = "#3a2a18";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = hole.state === "up" ? accent : "rgba(255,255,255,0.16)";
+        ctx.lineWidth = hole.state === "up" ? 2 : 1.4;
+        ctx.shadowColor = hole.state === "up" ? accent : "transparent";
+        ctx.shadowBlur = hole.state === "up" ? 14 : 0;
         ctx.stroke();
         ctx.restore();
 
-        if (h.state === "up") {
-          const pop = Math.min(1, h.stateT / 120);
+        if (hole.state === "up") {
+          const pop = Math.min(1, hole.stateT / 130);
+          const remaining = 1 - Math.min(1, hole.stateT / hole.upFor);
+          const cy = hole.y - hole.r * 0.55 * pop;
+          const body = hole.gold ? C.amber : "#c2915a";
+
           ctx.save();
           ctx.beginPath();
-          ctx.arc(h.x, h.y - h.r * 0.5 * pop, h.r * 0.85, 0, Math.PI * 2);
-          ctx.fillStyle = "#b98a4e";
-          ctx.shadowColor = "#ffb020";
+          ctx.arc(hole.x, cy, hole.r * 0.82, 0, Math.PI * 2);
+          ctx.fillStyle = body;
+          ctx.shadowColor = hole.gold ? C.amber : "#000";
+          ctx.shadowBlur = hole.gold ? 22 : 10;
+          ctx.fill();
+
+          ctx.fillStyle = "#16100a";
+          ctx.beginPath();
+          ctx.arc(hole.x - hole.r * 0.28, cy - hole.r * 0.14, hole.r * 0.11, 0, Math.PI * 2);
+          ctx.arc(hole.x + hole.r * 0.28, cy - hole.r * 0.14, hole.r * 0.11, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(hole.x, cy + hole.r * 0.2, hole.r * 0.16, 0, Math.PI);
+          ctx.stroke();
+          ctx.restore();
+
+          // Countdown ring — you can see exactly how long you have.
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(hole.x, cy, hole.r * 1.02, -Math.PI / 2, -Math.PI / 2 + remaining * Math.PI * 2);
+          ctx.strokeStyle = remaining < 0.3 ? C.danger : accent;
+          ctx.lineWidth = 2.5;
+          ctx.lineCap = "round";
+          ctx.shadowColor = ctx.strokeStyle;
           ctx.shadowBlur = 10;
-          ctx.fill();
-          // eyes
-          ctx.fillStyle = "#1a1206";
-          ctx.beginPath();
-          ctx.arc(h.x - h.r * 0.3, h.y - h.r * 0.5 * pop - h.r * 0.15, h.r * 0.1, 0, Math.PI * 2);
-          ctx.arc(h.x + h.r * 0.3, h.y - h.r * 0.5 * pop - h.r * 0.15, h.r * 0.1, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.stroke();
           ctx.restore();
-        } else if (h.state === "hit") {
+        } else if (hole.state === "hit") {
+          const t = hole.stateT / 240;
           ctx.save();
-          const t = h.stateT / 220;
           ctx.globalAlpha = 1 - t;
-          ctx.font = `bold ${Math.floor(h.r * 0.9)}px monospace`;
-          ctx.fillStyle = "#ffb020";
+          ctx.translate(hole.x, hole.y - hole.r * (0.5 + t));
+          ctx.scale(1 + t * 0.4, 1 + t * 0.4);
+          ctx.font = `700 ${Math.floor(hole.r * 0.62)}px "Space Grotesk", sans-serif`;
+          ctx.fillStyle = C.amber;
           ctx.textAlign = "center";
-          ctx.fillText("POW!", h.x, h.y - h.r);
+          ctx.shadowColor = C.amber;
+          ctx.shadowBlur = 14;
+          ctx.fillText("POW", 0, 0);
           ctx.restore();
         }
       }
 
-      for (const [side, handPoints] of this.hands.entries()) {
-        for (const tip of handPoints) {
-          drawHammer(ctx, tip.x, tip.y, side === 0 ? "#35ff8f" : "#ff5fae");
+      this.fx.draw(ctx);
+
+      for (const [side, hands] of this.hands.entries()) {
+        for (const hand of hands) {
+          drawHammer(ctx, hand.x, hand.y, side === 0 ? C.p1 : C.p2, hand.swing ?? 0);
         }
       }
 
-      ctx.save();
-      ctx.font = "bold 20px monospace";
-      ctx.textBaseline = "top";
-      ctx.shadowBlur = 8;
-      ctx.fillStyle = "#35ff8f";
-      ctx.shadowColor = "#35ff8f";
-      ctx.textAlign = "left";
-      ctx.fillText(`P1 ${this.scores[0]}`, 12, 10);
-      ctx.fillStyle = "#ff5fae";
-      ctx.shadowColor = "#ff5fae";
-      ctx.textAlign = "right";
-      ctx.fillText(`${this.scores[1]} P2  ${this.timeLeft.toFixed(0)}`, canvas.width - 12, 10);
-      ctx.restore();
+      if (shaking) ctx.restore();
+    },
+
+    getHud() {
+      const top = Math.max(this.scores[0], this.scores[1], 1);
+      const pod = (side) => {
+        const attempts = this.hits[side] + this.misses[side];
+        return {
+          value: this.scores[side],
+          meta: attempts > 0 ? `${Math.round((this.hits[side] / attempts) * 100)}% ACCURACY` : "",
+          ratio: this.scores[side] / top,
+        };
+      };
+      return {
+        p1: pod(0),
+        p2: pod(1),
+        center: {
+          value: Math.ceil(this.timeLeft),
+          label: "TIME",
+          ratio: this.timeLeft / MATCH_TIME,
+          danger: this.timeLeft <= 6,
+        },
+      };
     },
 
     isOver() {
@@ -163,11 +246,41 @@ export function createWhackAMole() {
     },
 
     getSummary() {
+      const [a, b] = this.scores;
+      const title = a > b ? "PLAYER 1 WINS" : b > a ? "PLAYER 2 WINS" : "DRAW";
+      const color = a > b ? C.p1 : b > a ? C.p2 : C.amber;
+      const top = Math.max(a, b, 1);
       return {
-        title: "TIME'S UP",
-        color: "#35ff8f",
-        lines: [`P1 whacked ${this.scores[0]} moles`, `P2 whacked ${this.scores[1]} moles`],
+        title,
+        color,
+        record: Math.max(a, b),
+        rows: [
+          { tag: "P1", text: `${this.hits[0]} hit · ${this.misses[0]} escaped`, value: `${a} pts`, ratio: a / top, color: C.p1 },
+          { tag: "P2", text: `${this.hits[1]} hit · ${this.misses[1]} escaped`, value: `${b} pts`, ratio: b / top, color: C.p2 },
+        ],
       };
     },
   };
+}
+
+function buildHoles(view) {
+  const holes = [];
+  const marginX = view.width * 0.09;
+  const marginY = view.height * 0.2;
+  const cellW = (view.width - marginX * 2) / COLS;
+  const cellH = (view.height - marginY * 2) / ROWS;
+  for (let row = 0; row < ROWS; row++) {
+    for (let col = 0; col < COLS; col++) {
+      holes.push({
+        x: marginX + cellW * (col + 0.5),
+        y: marginY + cellH * (row + 0.5),
+        r: Math.min(cellW, cellH) * 0.3,
+        state: "empty",           // empty | up | hit
+        stateT: 0,
+        gold: false,
+        upFor: UP_MS_START,
+      });
+    }
+  }
+  return holes;
 }
