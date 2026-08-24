@@ -12,17 +12,17 @@ export function createWhackAMole() {
     id: "whackamole",
     title: "Whack-a-Mole",
     icon: "🔨",
-    blurb: "Both hands are hammers · whack moles before they duck",
+    blurb: "2 players · whack moles on your side before they duck",
     mode: "hand",
     numHands: 2,
 
     init({ canvas, ctx }) {
       this.canvas = canvas;
       this.ctx = ctx;
-      this.score = 0;
+      this.scores = [0, 0];
       this.timeLeft = MATCH_TIME;
       this.lastSpawn = 0;
-      this.hands = [];
+      this.hands = [[], []];
       this.over = false;
 
       this.holes = [];
@@ -44,7 +44,11 @@ export function createWhackAMole() {
     },
 
     onResults(hands) {
-      this.hands = hands.map((lm) => toCanvasPoint(lm[8], this.canvas));
+      this.hands = [[], []];
+      for (const lm of hands) {
+        const point = toCanvasPoint(lm[8], this.canvas);
+        this.hands[point.x < this.canvas.width / 2 ? 0 : 1].push(point);
+      }
     },
 
     update(dt) {
@@ -71,11 +75,12 @@ export function createWhackAMole() {
       for (const h of this.holes) {
         h.stateT += dt * 1000;
         if (h.state === "up") {
-          for (const tip of this.hands) {
+          const side = h.x < this.canvas.width / 2 ? 0 : 1;
+          for (const tip of this.hands[side]) {
             if (dist(tip, h) < h.r + 12) {
               h.state = "hit";
               h.stateT = 0;
-              this.score += 1;
+              this.scores[side] += 1;
               break;
             }
           }
@@ -132,7 +137,8 @@ export function createWhackAMole() {
         }
       }
 
-      for (const tip of this.hands) {
+      for (const [side, handPoints] of this.hands.entries()) {
+        for (const tip of handPoints) {
         ctx.save();
         ctx.translate(tip.x, tip.y);
         ctx.rotate(-0.4);
@@ -143,6 +149,7 @@ export function createWhackAMole() {
         ctx.shadowBlur = 10;
         ctx.fillRect(-20, -28, 40, 22);
         ctx.restore();
+        }
       }
 
       ctx.save();
@@ -152,11 +159,11 @@ export function createWhackAMole() {
       ctx.fillStyle = "#35ff8f";
       ctx.shadowColor = "#35ff8f";
       ctx.textAlign = "left";
-      ctx.fillText(`SCORE ${this.score}`, 12, 10);
+      ctx.fillText(`P1 ${this.scores[0]}`, 12, 10);
       ctx.fillStyle = "#ffb020";
       ctx.shadowColor = "#ffb020";
       ctx.textAlign = "right";
-      ctx.fillText(this.timeLeft.toFixed(0), canvas.width - 12, 10);
+      ctx.fillText(`${this.scores[1]} P2  ${this.timeLeft.toFixed(0)}`, canvas.width - 12, 10);
       ctx.restore();
     },
 
@@ -168,7 +175,7 @@ export function createWhackAMole() {
       return {
         title: "TIME'S UP",
         color: "#35ff8f",
-        lines: [`You whacked ${this.score} moles`],
+        lines: [`P1 whacked ${this.scores[0]} moles`, `P2 whacked ${this.scores[1]} moles`],
       };
     },
   };

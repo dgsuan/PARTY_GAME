@@ -78,30 +78,29 @@ export function createCopyPose() {
     id: "copypose",
     title: "Copy the Pose",
     icon: "🧍",
-    blurb: "1 player · match the pose before the wall reaches you · 3 lives",
+    blurb: "2 players · match the pose before your wall reaches you · 3 lives",
     mode: "pose",
+    numPoses: 2,
 
     init({ canvas, ctx }) {
       this.canvas = canvas;
       this.ctx = ctx;
-      this.lives = 3;
-      this.score = 0;
-      this.speed = START_SPEED;
-      this.progress = 0; // 0 = wall far away, 1 = wall hits the line
-      this.holdTimer = 0;
       this.current = POSES[Math.floor(Math.random() * POSES.length)];
-      this.landmarks = null;
-      this.matched = false;
+      this.players = [createPlayer(), createPlayer()];
       this.over = false;
-      this.flashT = 0; // brief red flash when losing a life
     },
 
-    onResults(pose) {
-      this.landmarks = pose;
+    onResults(poses) {
+      this.players[0].landmarks = null;
+      this.players[1].landmarks = null;
+      for (const pose of poses) {
+        const nose = pose[IDX.nose];
+        const side = (1 - nose.x) < 0.5 ? 0 : 1;
+        this.players[side].landmarks = pose;
+      }
     },
 
-    getPoints() {
-      const lm = this.landmarks;
+    getPoints(lm) {
       if (!lm) return null;
       return {
         nose: lm[IDX.nose], ls: lm[IDX.ls], rs: lm[IDX.rs],
@@ -111,33 +110,34 @@ export function createCopyPose() {
 
     update(dt) {
       if (this.over) return;
-      if (this.flashT > 0) this.flashT -= dt;
+      for (const player of this.players) {
+        if (player.flashT > 0) player.flashT -= dt;
+        const points = this.getPoints(player.landmarks);
+        player.matched = !!points && this.current.check(points);
 
-      const pts = this.getPoints();
-      this.matched = !!pts && this.current.check(pts);
+        if (player.matched) {
+          player.holdTimer += dt;
+          if (player.holdTimer >= HOLD_TIME) {
+            player.score += 1;
+            player.speed += SPEED_STEP;
+            player.progress = 0;
+            player.holdTimer = 0;
+            this.current = pickNext(this.current);
+          }
+        } else {
+          player.holdTimer = 0;
+        }
 
-      if (this.matched) {
-        this.holdTimer += dt;
-        if (this.holdTimer >= HOLD_TIME) {
-          this.score += 1;
-          this.speed += SPEED_STEP;
-          this.progress = 0;
-          this.holdTimer = 0;
+        player.progress += player.speed * dt;
+        if (player.progress >= 1) {
+          player.lives -= 1;
+          player.flashT = 0.3;
+          player.progress = 0;
+          player.holdTimer = 0;
           this.current = pickNext(this.current);
         }
-      } else {
-        this.holdTimer = 0;
       }
-
-      this.progress += this.speed * dt;
-      if (this.progress >= 1) {
-        this.lives -= 1;
-        this.flashT = 0.3;
-        this.progress = 0;
-        this.holdTimer = 0;
-        this.current = pickNext(this.current);
-        if (this.lives <= 0) this.over = true;
-      }
+      this.over = this.players.some((player) => player.lives <= 0);
     },
 
     draw(ctx) {
@@ -156,60 +156,59 @@ export function createCopyPose() {
       ctx.restore();
 
       // wall sliding from top toward the danger line
-      const wallY = 40 + this.progress * (dangerY - 60);
-      ctx.save();
-      ctx.fillStyle = this.matched ? "rgba(53,255,143,0.18)" : "rgba(255,176,32,0.14)";
-      ctx.fillRect(0, wallY - 55, canvas.width, 110);
-      ctx.restore();
-
-      this.current.icon(ctx, canvas.width / 2, wallY, 34, this.matched);
-
-      ctx.save();
-      ctx.font = "bold 16px monospace";
-      ctx.textAlign = "center";
-      ctx.fillStyle = this.matched ? "#35ff8f" : "#ffb020";
-      ctx.shadowColor = ctx.fillStyle;
-      ctx.shadowBlur = 8;
-      ctx.fillText(this.current.label, canvas.width / 2, wallY + 62);
-      if (this.matched && this.holdTimer > 0) {
-        ctx.fillText("HOLD IT!", canvas.width / 2, wallY + 82);
-      }
-      ctx.restore();
-
-      // skeleton feedback dots for the player
-      if (this.landmarks) {
+      for (const [index, player] of this.players.entries()) {
+        const left = index === 0;
+        const centerX = left ? canvas.width * 0.25 : canvas.width * 0.75;
+        const wallY = 40 + player.progress * (dangerY - 60);
         ctx.save();
-        for (const idx of Object.values(IDX)) {
-          const p = toCanvasPoint(this.landmarks[idx], canvas);
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
-          ctx.fillStyle = this.matched ? "#35ff8f" : "#ffffff";
-          ctx.fill();
+        ctx.fillStyle = player.matched ? "rgba(53,255,143,0.18)" : "rgba(255,176,32,0.14)";
+        ctx.fillRect(left ? 0 : canvas.width / 2, wallY - 55, canvas.width / 2, 110);
+        ctx.restore();
+
+        this.current.icon(ctx, centerX, wallY, 30, player.matched);
+
+        ctx.save();
+        ctx.font = "bold 14px monospace";
+        ctx.textAlign = "center";
+        ctx.fillStyle = player.matched ? "#35ff8f" : "#ffb020";
+        ctx.shadowColor = ctx.fillStyle;
+        ctx.shadowBlur = 8;
+        ctx.fillText(this.current.label, centerX, wallY + 56);
+        if (player.matched && player.holdTimer > 0) ctx.fillText("HOLD IT!", centerX, wallY + 74);
+        ctx.restore();
+
+        if (player.landmarks) {
+          ctx.save();
+          for (const idx of Object.values(IDX)) {
+            const point = toCanvasPoint(player.landmarks[idx], canvas);
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+            ctx.fillStyle = player.matched ? "#35ff8f" : "#ffffff";
+            ctx.fill();
+          }
+          ctx.restore();
         }
-        ctx.restore();
+        if (player.flashT > 0) {
+          ctx.save();
+          ctx.globalAlpha = player.flashT / 0.3 * 0.4;
+          ctx.fillStyle = "#ff3b3b";
+          ctx.fillRect(left ? 0 : canvas.width / 2, 0, canvas.width / 2, canvas.height);
+          ctx.restore();
+        }
       }
 
-      if (this.flashT > 0) {
-        ctx.save();
-        ctx.globalAlpha = this.flashT / 0.3 * 0.4;
-        ctx.fillStyle = "#ff3b3b";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.restore();
-      }
-
-      // HUD
       ctx.save();
       ctx.font = "bold 18px monospace";
       ctx.textBaseline = "top";
       ctx.textAlign = "left";
-      ctx.fillStyle = "#ff5fae";
-      ctx.shadowColor = "#ff5fae";
-      ctx.shadowBlur = 8;
-      ctx.fillText("♥".repeat(this.lives) + "♡".repeat(3 - this.lives), 12, 10);
-      ctx.textAlign = "right";
       ctx.fillStyle = "#35ff8f";
       ctx.shadowColor = "#35ff8f";
-      ctx.fillText(`SCORE ${this.score}`, canvas.width - 12, 10);
+      ctx.shadowBlur = 8;
+      ctx.fillText(`P1 ${"♥".repeat(this.players[0].lives)}${"♡".repeat(3 - this.players[0].lives)}  ${this.players[0].score}`, 12, 10);
+      ctx.textAlign = "right";
+      ctx.fillStyle = "#ff5fae";
+      ctx.shadowColor = "#ff5fae";
+      ctx.fillText(`${this.players[1].score}  ${"♥".repeat(this.players[1].lives)}${"♡".repeat(3 - this.players[1].lives)} P2`, canvas.width - 12, 10);
       ctx.restore();
     },
 
@@ -221,10 +220,14 @@ export function createCopyPose() {
       return {
         title: "WALL BREACHED",
         color: "#ff3b3b",
-        lines: [`You matched ${this.score} poses`],
+        lines: [`P1 matched ${this.players[0].score} poses`, `P2 matched ${this.players[1].score} poses`],
       };
     },
   };
+}
+
+function createPlayer() {
+  return { lives: 3, score: 0, speed: START_SPEED, progress: 0, holdTimer: 0, landmarks: null, matched: false, flashT: 0 };
 }
 
 function pickNext(current) {
