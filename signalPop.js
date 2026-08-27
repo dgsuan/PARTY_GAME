@@ -4,8 +4,8 @@ import { sfx } from "./audio.js";
 
 const BUBBLE_MIN_R = 20;
 const BUBBLE_MAX_R = 38;
-const SPAWN_START_MS = 620;
-const SPAWN_FLOOR_MS = 280;     // spawn rate tightens as the clock runs down
+const SPAWN_START = 0.62;       // seconds between spawns at kickoff
+const SPAWN_FLOOR = 0.28;       // spawn rate tightens as the clock runs down
 const BOMB_CHANCE = 0.2;
 const BOMB_PENALTY = 5;
 const MATCH_TIME = 30;
@@ -20,18 +20,25 @@ export function createSignalPop() {
     blurb: "Pop rising signals, dodge the bombs. Streaks multiply your score.",
     players: "2P VS",
     hint: "One player each side — raise an index finger",
+    tutorial: [
+      "Point with one index finger — your side is your half of the screen.",
+      "Pop the teal bubbles. Gold ones are worth 3.",
+      "Red bombs cost you 5 and kill your streak — let them float past.",
+    ],
     mode: "hand",
     numHands: 2,
 
-    init({ view }) {
+    init({ view, practice = false }) {
       this.view = view;
+      this.practice = practice;
+      this.drill = [0, 0];
       this.scores = [0, 0];
       this.streaks = [0, 0];
       this.best = [0, 0];
       this.timeLeft = MATCH_TIME;
       this.bubbles = [];
       this.tips = [null, null];
-      this.lastSpawn = 0;
+      this.lastSpawn = 0;          // measured against this.elapsed, not wall time
       this.elapsed = 0;
       this.fx = createFx();
       this.shake = createShake();
@@ -65,7 +72,9 @@ export function createSignalPop() {
     spawnBubble() {
       const r = BUBBLE_MIN_R + Math.random() * (BUBBLE_MAX_R - BUBBLE_MIN_R);
       const roll = Math.random();
-      const type = roll < BOMB_CHANCE ? "bomb" : roll < BOMB_CHANCE + 0.14 ? "amber" : "signal";
+      // The warm-up never spawns bombs: punishing a player before the match
+      // has started teaches nothing.
+      const type = this.practice ? "signal" : roll < BOMB_CHANCE ? "bomb" : roll < BOMB_CHANCE + 0.14 ? "amber" : "signal";
       this.bubbles.push({
         x: r + Math.random() * (this.view.width - 2 * r),
         y: this.view.height + r,
@@ -81,21 +90,21 @@ export function createSignalPop() {
     update(dt) {
       if (this.over) return;
       this.elapsed += dt;
-      this.timeLeft -= dt;
       this.fx.update(dt);
       this.shake.update(dt);
+      if (this.practice) this.lastSpawn = Math.min(this.lastSpawn, this.elapsed);
+      else this.timeLeft -= dt;
 
-      if (this.timeLeft <= 0) {
+      if (!this.practice && this.timeLeft <= 0) {
         this.timeLeft = 0;
         this.over = true;
         return;
       }
 
-      const now = performance.now();
-      const interval = Math.max(SPAWN_FLOOR_MS, SPAWN_START_MS - this.elapsed * 11);
-      if (now - this.lastSpawn > interval) {
+      const interval = this.practice ? 0.8 : Math.max(SPAWN_FLOOR, SPAWN_START - this.elapsed * 0.011);
+      if (this.elapsed - this.lastSpawn > interval) {
         this.spawnBubble();
-        this.lastSpawn = now;
+        this.lastSpawn = this.elapsed;
       }
 
       for (const bubble of this.bubbles) {
@@ -126,6 +135,7 @@ export function createSignalPop() {
           const gain = base * this.multiplier(side);
           this.scores[side] += gain;
           this.streaks[side] += 1;
+          this.drill[side] += 1;
           this.best[side] = Math.max(this.best[side], this.streaks[side]);
           const color = bubble.type === "amber" ? C.amber : side === 0 ? C.p1 : C.p2;
           this.fx.burst(bubble.x, bubble.y, color, 10);
@@ -246,6 +256,17 @@ export function createSignalPop() {
       if (shaking) ctx.restore();
     },
 
+    getDrill() {
+      const target = 2;
+      return {
+        label: "POP 2 SIGNALS EACH",
+        tip: "Point with one finger and touch a bubble on your side",
+        target,
+        progress: this.drill,
+        done: this.drill[0] >= target && this.drill[1] >= target,
+      };
+    },
+
     getHud() {
       const top = Math.max(this.scores[0], this.scores[1], 1);
       const pod = (side) => ({
@@ -273,12 +294,14 @@ export function createSignalPop() {
 
     getSummary() {
       const [a, b] = this.scores;
-      const title = a > b ? "PLAYER 1 WINS" : b > a ? "PLAYER 2 WINS" : "DRAW";
-      const color = a > b ? C.p1 : b > a ? C.p2 : C.amber;
+      const winner = a > b ? 1 : b > a ? 2 : null;
       const top = Math.max(a, b, 1);
       return {
-        title,
-        color,
+        title: winner ? `PLAYER ${winner} WINS` : "DRAW",
+        color: winner === 1 ? C.p1 : winner === 2 ? C.p2 : C.amber,
+        winner,
+        // Level on points? The longer streak was the cleaner run.
+        tiebreak: [this.best[0], this.best[1]],
         record: Math.max(a, b),
         rows: [
           { tag: "P1", text: `best streak ${this.best[0]}`, value: `${a} pts`, ratio: a / top, color: C.p1 },

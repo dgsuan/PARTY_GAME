@@ -3,8 +3,11 @@ import { createSignalPop } from "./signalPop.js";
 import { createWhackAMole } from "./whackAMole.js";
 import { createCopyPose } from "./copyPose.js";
 import { createIceBreaker } from "./iceBreaker.js";
+import { createHullBreach } from "./hullBreach.js";
 import { mountPreview, startPreviews, stopPreviews, measurePreviews } from "./previews.js";
 import { sfx, unlock, isMuted, setMuted } from "./audio.js";
+import { pickRandom, toCanvasPoint } from "./utils.js";
+import { C } from "./theme.js";
 
 /* ═══════════════════════════════════════════════════════════════════
    Game contract — every factory returns an object with:
@@ -21,7 +24,14 @@ import { sfx, unlock, isMuted, setMuted } from "./audio.js";
    crisp and consistent across all four channels.
    ═══════════════════════════════════════════════════════════════════ */
 
-const GAMES = [createSignalPop, createWhackAMole, createCopyPose, createIceBreaker];
+const GAMES = [createSignalPop, createWhackAMole, createCopyPose, createIceBreaker, createHullBreach];
+
+// Metadata is stable, so build it once instead of re-instantiating games.
+const META = GAMES.map((factory) => factory());
+
+// The gauntlet is a last-player-standing format, so it can only draw on
+// versus channels — a co-op round has no loser to take a life from.
+const VERSUS_GAMES = GAMES.filter((_, index) => !META[index].coop);
 
 const $ = (id) => document.getElementById(id);
 
@@ -34,15 +44,16 @@ const errorScreen = $("errorScreen");
 const loadingScreen = $("loadingScreen");
 const gameOverScreen = $("gameOverScreen");
 const countScreen = $("countScreen");
+const briefScreen = $("briefScreen");
 const pauseScreen = $("pauseScreen");
 const errorMsg = $("errorMsg");
 const quitBtn = $("quitBtn");
 const hud = $("hud");
 const toast = $("toast");
 
-const view = { width: 1, height: 1 };
+const view = { width: 1, height: 1, videoWidth: 0, videoHeight: 0 };
 
-let state = "menu";           // menu | loading | countdown | playing | paused | over | error
+let state = "menu";           // menu | loading | warmup | countdown | playing | paused | over | error
 let cards = [];
 let cursor = 0;
 let selectedFactory = null;
@@ -54,13 +65,33 @@ let lastFrameTime = 0;
 let lastVideoTime = -1;
 let sequenceToken = 0;        // cancels an in-flight countdown/boot
 let subjects = 0;
+let lastResults = [];
 let noSubjectSince = 0;
 let toastTimer = null;
+
+/* ── Play modes ──────────────────────────────────────────────────────
+   "single"   one chosen channel, rematch replays the same one
+   "shuffle"  a random channel; rematch deals another
+   "gauntlet" random channels back to back, three lives each — a match
+              loss costs a life, and the series ends when someone hits 0
+   ─────────────────────────────────────────────────────────────────── */
+const SERIES_LIVES = 3;
+let playMode = "single";
+const series = { lives: [SERIES_LIVES, SERIES_LIVES], round: 0, history: [], lastLost: null, lastDecision: null, over: false };
+
+function resetSeries() {
+  series.lives = [SERIES_LIVES, SERIES_LIVES];
+  series.round = 0;
+  series.history.length = 0;
+  series.lastLost = null;
+  series.lastDecision = null;
+  series.over = false;
+}
 
 /* ── Small DOM helpers ───────────────────────────────────────────── */
 const show = (el) => el.classList.remove("hidden");
 const hide = (el) => el.classList.add("hidden");
-const panels = () => [menuScreen, errorScreen, loadingScreen, gameOverScreen, countScreen, pauseScreen];
+const panels = () => [menuScreen, errorScreen, loadingScreen, gameOverScreen, countScreen, pauseScreen, briefScreen];
 
 function setState(next) {
   state = next;
@@ -68,18 +99,21 @@ function setState(next) {
   hud.classList.add("hidden");
   quitBtn.classList.add("hidden");
 
-  if (next === "menu") { show(menuScreen); startPreviews(); }
+  cancelAutoNext();
+  if (next === "menu") { show(menuScreen); startPreviews("menu"); }
+  else if (next === "warmup") show(briefScreen);
   else stopPreviews();
 
   if (next === "loading") show(loadingScreen);
   if (next === "error") show(errorScreen);
   if (next === "over") show(gameOverScreen);
   if (next === "paused") { show(pauseScreen); hud.classList.remove("hidden"); }
+  if (next === "warmup") hud.classList.remove("hidden");
   if (next === "countdown") { show(countScreen); quitBtn.classList.remove("hidden"); }
   if (next === "playing") { hud.classList.remove("hidden"); quitBtn.classList.remove("hidden"); }
 
   $("modeValue").textContent = {
-    menu: "IDLE", loading: "BOOT", countdown: "READY",
+    menu: "IDLE", loading: "BOOT", warmup: "DRILL", countdown: "READY",
     playing: "LIVE", paused: "HOLD", over: "RESULT", error: "FAULT",
   }[next] || "IDLE";
 
@@ -87,6 +121,31 @@ function setState(next) {
     ? `CH.${String(GAMES.findIndex((f) => f === selectedFactory) + 1).padStart(2, "0")}`
     : "CH.——";
   $("headTitle").textContent = currentGame && next !== "menu" ? currentGame.title : "CHANNEL SELECT";
+  renderSeriesBar();
+}
+
+// Renders life pips into a container. `losing` animates the pip that was
+// just spent, so a lost life is felt rather than merely displayed.
+function renderLives(host, side, lives, losing = false) {
+  host.replaceChildren(...Array.from({ length: SERIES_LIVES }, (_, index) => {
+    const pip = document.createElement("i");
+    pip.className = "life";
+    pip.dataset.side = String(side);
+    if (index >= lives) pip.classList.add("spent");
+    if (losing && index === lives) pip.classList.add("losing");
+    return pip;
+  }));
+}
+
+function renderSeriesBar(animateLoss = false) {
+  const bar = $("seriesBar");
+  if (playMode !== "gauntlet") { hide(bar); return; }
+  show(bar);
+  renderLives($("lives1"), 1, series.lives[0], animateLoss && series.lastLost === 0);
+  renderLives($("lives2"), 2, series.lives[1], animateLoss && series.lastLost === 1);
+  $("seriesRound").textContent = series.over
+    ? "SERIES OVER"
+    : `ROUND ${Math.max(1, series.round)}${currentGame ? ` · ${currentGame.title.toUpperCase()}` : ""}`;
 }
 
 function flash(message, ms = 2200) {
@@ -97,7 +156,13 @@ function flash(message, ms = 2200) {
 }
 
 /* ── Canvas sizing (HiDPI-correct) ───────────────────────────────── */
+function syncVideoSize() {
+  view.videoWidth = video.videoWidth || 0;
+  view.videoHeight = video.videoHeight || 0;
+}
+
 function layout() {
+  syncVideoSize();
   const rect = canvas.getBoundingClientRect();
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   view.width = Math.max(1, Math.round(rect.width));
@@ -109,12 +174,12 @@ function layout() {
 
 /* ── Menu ────────────────────────────────────────────────────────── */
 function buildMenu() {
-  const accents = ["var(--p1)", "var(--p2)", "var(--violet)", "var(--ice)"];
+  const accents = ["var(--p1)", "var(--p2)", "var(--violet)", "var(--ice)", "var(--amber)"];
   GAMES.forEach((factory, index) => {
-    const meta = factory();
+    const meta = META[index];
     const card = document.createElement("button");
     card.type = "button";
-    card.className = "channel";
+    card.className = meta.coop ? "channel channel-coop" : "channel";
     card.style.setProperty("--accent", accents[index % accents.length]);
     card.setAttribute("aria-current", index === 0 ? "true" : "false");
     card.innerHTML = `
@@ -131,7 +196,7 @@ function buildMenu() {
         <span class="ch-go">TUNE IN ▸</span>
       </span>`;
 
-    card.addEventListener("click", () => { moveCursor(index); launch(factory); });
+    card.addEventListener("click", () => { moveCursor(index); startSingle(factory); });
     card.addEventListener("mouseenter", () => { if (cursor !== index) { moveCursor(index); sfx.hover(); } });
     card.addEventListener("focus", () => moveCursor(index));
 
@@ -182,6 +247,7 @@ async function startCamera() {
     await new Promise((resolve) => { video.onloadedmetadata = resolve; });
   }
   await video.play();
+  syncVideoSize();
   lastVideoTime = -1;
   setChip($("chipCam"), "on", "CAMERA");
   document.querySelector('[data-led="cam"]').classList.add("on");
@@ -209,23 +275,37 @@ async function getLandmarker(game) {
   const key = `${game.mode}:${count}`;
   if (landmarkers.has(key)) return landmarkers.get(key);
   const vision = await getVision();
-  const instance = game.mode === "pose"
-    ? await PoseLandmarker.createFromOptions(vision, {
+
+  const build = (delegate) => (game.mode === "pose"
+    ? PoseLandmarker.createFromOptions(vision, {
         baseOptions: {
           modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
-          delegate: "GPU",
+          delegate,
         },
         runningMode: "VIDEO",
         numPoses: count,
       })
-    : await HandLandmarker.createFromOptions(vision, {
+    : HandLandmarker.createFromOptions(vision, {
         baseOptions: {
           modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-          delegate: "GPU",
+          delegate,
         },
         runningMode: "VIDEO",
         numHands: count,
-      });
+      }));
+
+  // The GPU delegate is the fast path but is not available everywhere —
+  // WebKit in particular can refuse it. Falling back to CPU keeps the game
+  // playable at a lower frame rate instead of failing outright.
+  let instance;
+  try {
+    instance = await build("GPU");
+  } catch (error) {
+    console.warn("GPU delegate unavailable, falling back to CPU", error);
+    instance = await build("CPU");
+    flash("GPU UNAVAILABLE — RUNNING ON CPU", 3200);
+  }
+
   landmarkers.set(key, instance);
   return instance;
 }
@@ -240,6 +320,188 @@ function setChip(el, value, text) {
   }
 }
 
+/* ── Play-mode entry points ──────────────────────────────────────── */
+
+function startSingle(factory) {
+  playMode = "single";
+  resetSeries();
+  launch(factory);
+}
+
+// A random channel, never the one just played.
+function startShuffle() {
+  playMode = "shuffle";
+  resetSeries();
+  launch(pickRandom(GAMES, selectedFactory));
+}
+
+function startGauntlet() {
+  playMode = "gauntlet";
+  resetSeries();
+  nextRound();
+}
+
+function nextRound() {
+  series.round += 1;
+  series.lastLost = null;
+  launch(pickRandom(VERSUS_GAMES, selectedFactory));
+}
+
+// What the primary results button should do next, given the mode.
+function primaryAction() {
+  if (playMode === "gauntlet") return series.over ? startGauntlet : nextRound;
+  if (playMode === "shuffle") return startShuffle;
+  return () => launch(selectedFactory);
+}
+
+
+/* ── Warm-up ─────────────────────────────────────────────────────────
+   Every match opens with a short, real playthrough of the channel rather
+   than a wall of text. The game runs with its teeth pulled — no bombs, no
+   clock, no flooding — and each player has a small objective to complete.
+   Finishing the drill proves the tracking works far better than a readout
+   does, because you only complete it by actually being seen.
+   ─────────────────────────────────────────────────────────────────── */
+const WARMUP_TIMEOUT = 40;   // start anyway rather than trapping anyone
+const TIP_EVERY = 3.6;       // seconds each tutorial line stays up
+let warmElapsed = 0;
+let tipIndex = 0;
+let warmResolve = null;
+let present = [false, false];
+
+function warmup(token) {
+  return new Promise((resolve) => {
+    warmResolve = () => { warmResolve = null; resolve(); };
+    warmElapsed = 0;
+    present = [false, false];
+
+    const drill = currentGame.getDrill?.();
+    const coop = !!currentGame.coop;
+
+    $("drillLabel").textContent = drill?.label || "TRY IT OUT";
+    briefScreen.classList.toggle("coop", coop);
+    $("readyName1").textContent = coop ? "CREW" : "P1";
+    $("readyName2").textContent = "P2";
+    tipIndex = 0;
+
+    // Real game, practice settings.
+    currentGame.init({ canvas, ctx, view, practice: true });
+
+    setState("warmup");
+    startLoop();
+
+    if (token !== sequenceToken) warmResolve?.();
+  });
+}
+
+// Which halves of the frame currently hold a tracked player.
+function detectPresence() {
+  const found = [false, false];
+  if (!currentGame) return found;
+
+  if (currentGame.mode === "pose") {
+    for (const pose of lastResults) {
+      if (!pose[11] || !pose[12] || !pose[23] || !pose[24]) continue;
+      const shoulders = (pose[11].x + pose[12].x) / 2;
+      const hips = (pose[23].x + pose[24].x) / 2;
+      const centre = 1 - (shoulders + hips) / 2;   // mirrored screen space
+      found[centre < 0.5 ? 0 : 1] = true;
+    }
+  } else {
+    for (const hand of lastResults) {
+      if (!hand[8]) continue;
+      const point = toCanvasPoint(hand[8], view);
+      found[point.x < view.width / 2 ? 0 : 1] = true;
+    }
+  }
+  return found;
+}
+
+function updateWarmup(dt) {
+  warmElapsed += dt;
+  present = detectPresence();
+
+  const drill = currentGame.getDrill?.() ?? { target: 1, progress: [1, 1], done: true };
+  const coop = !!drill.coop;
+  const sides = coop ? [0] : [0, 1];
+
+  for (const side of sides) {
+    const value = drill.progress[side] ?? 0;
+    const complete = value >= drill.target;
+    const slot = $(`readySlot${side + 1}`);
+    // Three states, and they say different things: waiting (not seen),
+    // tracked (seen, still working), done (drill complete).
+    const next = complete ? "done" : present[side] || coop ? "tracked" : "waiting";
+    if (slot.dataset.state !== next) slot.dataset.state = next;
+
+    const text = `${Math.min(value, drill.target)}/${drill.target}`;
+    const countEl = $(`readyState${side + 1}`);
+    if (countEl.textContent !== text) countEl.textContent = text;
+  }
+
+  const timedOut = warmElapsed > WARMUP_TIMEOUT;
+  const missing = !coop && (!present[0] || !present[1]);
+
+  // Status wins the tip slot when it matters; otherwise the tutorial lines
+  // rotate through it, one at a time, so they cost no screen space.
+  let tip;
+  if (drill.done) tip = "Nice — starting the real match…";
+  else if (timedOut) tip = "Starting anyway — you can join once the round begins";
+  else if (missing) {
+    tip = currentGame.mode === "pose"
+      ? "Step back until both players fit, one on each side"
+      : "Both players: raise a hand into your half of the screen";
+  } else {
+    const lines = currentGame.tutorial || [];
+    const rotated = lines.length ? lines[Math.floor(warmElapsed / TIP_EVERY) % lines.length] : "";
+    tip = rotated || drill.tip || "Try it out";
+  }
+  const promptEl = $("briefPrompt");
+  if (promptEl.textContent !== tip) promptEl.textContent = tip;
+
+  if (drill.done || timedOut) finishWarmup();
+}
+
+function finishWarmup() {
+  if (!warmResolve) return;
+  const done = warmResolve;
+  warmResolve = null;
+  done();
+}
+
+// A light frame around each half so players know which side is theirs.
+function drawWarmupGuides(ctx) {
+  if (currentGame.coop) return;
+  const half = view.width / 2;
+  const inset = 12;
+
+  for (const side of [0, 1]) {
+    const x = side === 0 ? inset : half + inset / 2;
+    const w = half - inset * 1.5;
+    const color = side === 0 ? C.p1 : C.p2;
+    const ok = present[side];
+    ctx.save();
+    ctx.globalAlpha = ok ? 0.35 : 0.5;
+    ctx.strokeStyle = ok ? color : "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash(ok ? [] : [10, 8]);
+    ctx.strokeRect(x, inset, w, view.height - inset * 2);
+    ctx.restore();
+
+    if (!ok) {
+      ctx.save();
+      ctx.font = '700 13px "JetBrains Mono", monospace';
+      ctx.textAlign = "center";
+      ctx.fillStyle = C.amber;
+      ctx.globalAlpha = 0.6 + Math.sin(performance.now() / 240) * 0.4;
+      ctx.shadowColor = C.amber;
+      ctx.shadowBlur = 10;
+      ctx.fillText(`PLAYER ${side + 1} — STEP INTO FRAME`, x + w / 2, view.height / 2);
+      ctx.restore();
+    }
+  }
+}
+
 /* ── Launch sequence ─────────────────────────────────────────────── */
 async function launch(factory) {
   unlock();
@@ -248,6 +510,7 @@ async function launch(factory) {
   if (!selectedFactory) return;
 
   const token = ++sequenceToken;
+  finishWarmup();          // release a warm-up left over from a prior launch
   stopLoop();
   resetHudCache();
   currentGame = selectedFactory();
@@ -282,13 +545,21 @@ async function launch(factory) {
   layout();
   currentGame.init({ canvas, ctx, view });
   setStep($("stepCal"), "done");
+  await warmup(token);
+  if (token !== sequenceToken) return;
+
+  // Throw away the practice run and start the real match from zero.
+  currentGame.init({ canvas, ctx, view });
+  resetHudCache();
   await countdown(token);
 }
 
 function countdown(token) {
   return new Promise((resolve) => {
     setState("countdown");
-    $("countHint").textContent = currentGame.hint || "Step into frame";
+    $("countHint").textContent = playMode === "gauntlet"
+      ? `ROUND ${series.round} · ${currentGame.title.toUpperCase()} — ${currentGame.hint || "step into frame"}`
+      : currentGame.hint || "Step into frame";
     let n = 3;
     const numEl = $("countNum");
     numEl.textContent = String(n);
@@ -342,6 +613,7 @@ function detect(timestampMs) {
   const result = landmarker.detectForVideo(video, timestampMs);
   const found = result.landmarks || [];
   subjects = found.length;
+  lastResults = found;
   currentGame.onResults(found);
 }
 
@@ -367,6 +639,12 @@ function tick(now) {
     if (currentGame.isOver()) finish();
   } else if (state === "countdown") {
     currentGame.draw(ctx);   // players can see the board while they get set
+  } else if (state === "warmup") {
+    currentGame.update(dt);
+    currentGame.draw(ctx);
+    drawWarmupGuides(ctx);
+    updateHud();
+    updateWarmup(dt);
   }
 
   measureFps(now);
@@ -393,7 +671,7 @@ function updateTracking(now) {
 }
 
 /* ── HUD (DOM, updated only when values change) ──────────────────── */
-const hudCache = { v1: null, v2: null, c: null, m1: null, m2: null, cl: null };
+const hudCache = { v1: null, v2: null, c: null, m1: null, m2: null, cl: null, t1: null, t2: null };
 const DASH = 119.4;
 
 function updateHud() {
@@ -429,6 +707,15 @@ function writePod(index, pod) {
     valueEl.classList.add("bump");
     setTimeout(() => valueEl.classList.remove("bump"), 130);
   }
+  // Co-op relabels the pods (SEALED / WATER) and recolours them.
+  const tagKey = index === 1 ? "t1" : "t2";
+  const tag = pod.tag || `P${index}`;
+  if (tag !== hudCache[tagKey]) {
+    hudCache[tagKey] = tag;
+    $(`hudTag${index}`).textContent = tag;
+  }
+  if (pod.accent) $(`hudPod${index}`).style.setProperty("--accent", pod.accent);
+
   const metaKey = index === 1 ? "m1" : "m2";
   if (pod.meta !== hudCache[metaKey]) {
     hudCache[metaKey] = pod.meta;
@@ -441,6 +728,10 @@ const clamp01 = (n) => Math.max(0, Math.min(1, Number.isFinite(n) ? n : 0));
 
 function resetHudCache() {
   hudCache.v1 = hudCache.v2 = hudCache.c = hudCache.m1 = hudCache.m2 = hudCache.cl = null;
+  hudCache.t1 = hudCache.t2 = null;
+  // Versus games rely on the stylesheet defaults for pod colour.
+  $("hudPod1").style.removeProperty("--accent");
+  $("hudPod2").style.removeProperty("--accent");
 }
 
 /* ── FPS meter ───────────────────────────────────────────────────── */
@@ -476,28 +767,155 @@ function measureFps(now) {
 }
 
 /* ── End of match ────────────────────────────────────────────────── */
+/* ── Deciding a gauntlet round ───────────────────────────────────────
+   A gauntlet round must always produce a loser. If it did not, a run of
+   drawn rounds would deduct no lives and the series could never end.
+   Resolution order:
+     1. the game's own winner
+     2. the game's tiebreak metric (best streak, accuracy, damage, …)
+     3. the player who is behind on lives — which also guarantees the
+        series terminates, since every round now removes exactly one life
+     4. a coin toss, if even that is level
+   ─────────────────────────────────────────────────────────────────── */
+function decideRound(summary) {
+  if (summary.winner) return { winner: summary.winner, how: "play" };
+
+  const [t1, t2] = summary.tiebreak || [0, 0];
+  if (t1 !== t2) return { winner: t1 > t2 ? 1 : 2, how: "tiebreak" };
+
+  const [l1, l2] = series.lives;
+  if (l1 !== l2) return { winner: l1 < l2 ? 1 : 2, how: "underdog" };
+
+  return { winner: Math.random() < 0.5 ? 1 : 2, how: "toss" };
+}
+
+// Applies a match result to the running series.
+function applySeriesResult(summary) {
+  const decision = decideRound(summary);
+  series.lastDecision = decision;
+  series.lastLost = decision.winner === 1 ? 1 : 0;
+  series.lives[series.lastLost] -= 1;
+  series.history.push({
+    round: series.round,
+    game: currentGame.title,
+    winner: decision.winner,
+    how: decision.how,
+  });
+  series.over = series.lives.some((lives) => lives <= 0);
+}
+
+function seriesChampion() {
+  if (!series.over) return null;
+  return series.lives[0] <= 0 ? 2 : 1;
+}
+
+// The round-by-round log shown when a gauntlet ends.
+function buildSeriesLog() {
+  const log = document.createElement("div");
+  log.className = "series-log";
+  log.replaceChildren(...series.history.map((entry) => {
+    const row = document.createElement("div");
+    row.className = "series-log-row";
+    const color = entry.winner === 1 ? "var(--p1)" : "var(--p2)";
+    row.style.setProperty("--accent", color);
+    const mark = entry.how === "play" ? "" : entry.how === "tiebreak" ? " ·tb" : entry.how === "underdog" ? " ·cb" : " ·ct";
+    row.innerHTML = `<span class="sl-round">R${String(entry.round).padStart(2, "0")}</span>
+                     <span class="sl-game">${entry.game}</span>
+                     <span class="sl-win" style="color:${color}">P${entry.winner}${mark}</span>`;
+    return row;
+  }));
+  return log;
+}
+
+function renderSeriesStatus(summary) {
+  const host = $("seriesStatus");
+  if (playMode !== "gauntlet") { hide(host); return; }
+  show(host);
+
+  const head = document.createElement("span");
+  head.className = "series-status-head";
+  const how = series.lastDecision?.how;
+  const decidedBy = how === "tiebreak" ? " ON TIEBREAK"
+    : how === "underdog" ? " ON COUNTBACK"
+    : how === "toss" ? " ON A COIN TOSS"
+    : "";
+  head.textContent = series.over
+    ? `GAUNTLET DECIDED IN ${series.round} ${series.round === 1 ? "ROUND" : "ROUNDS"}`
+    : `PLAYER ${series.lastLost + 1} LOSES A LIFE${decidedBy}`;
+
+  const rows = document.createElement("div");
+  rows.className = "series-status-rows";
+  for (const side of [1, 2]) {
+    const group = document.createElement("div");
+    group.className = "series-status-side";
+    const tag = document.createElement("span");
+    tag.className = "series-tag";
+    tag.dataset.side = String(side);
+    tag.textContent = `P${side}`;
+    const pips = document.createElement("span");
+    pips.className = "lives";
+    renderLives(pips, side, series.lives[side - 1], series.lastLost === side - 1);
+    group.append(...(side === 1 ? [tag, pips] : [pips, tag]));
+    rows.appendChild(group);
+  }
+
+  host.replaceChildren(head, rows);
+}
+
+function buildResultRow(row) {
+  const el = document.createElement("div");
+  el.className = "result-row";
+  el.style.setProperty("--accent", row.color || "var(--p1)");
+  el.innerHTML = `<span class="r-tag">${row.tag}</span>
+                  <span class="r-text">${row.text}</span>
+                  <span class="r-val">${row.value}</span>
+                  <span class="r-track"><i></i></span>`;
+  // Next frame, so the width transition actually animates from zero.
+  requestAnimationFrame(() => {
+    el.querySelector(".r-track i").style.width = `${clamp01(row.ratio ?? 0) * 100}%`;
+  });
+  return el;
+}
+
 function finish() {
   stopLoop();
   const summary = currentGame.getSummary();
+  if (playMode === "gauntlet") applySeriesResult(summary);
 
-  $("gameOverTitle").textContent = summary.title;
-  $("gameOverTitle").style.color = summary.color || "";
-  $("gameOverTitle").style.textShadow = summary.color ? `0 0 34px ${summary.color}66` : "";
+  const champion = seriesChampion();
+  const finale = playMode === "gauntlet" && series.over;
+
+  const roundWinner = playMode === "gauntlet" ? series.lastDecision?.winner : null;
+  $("gameOverTitle").textContent = finale
+    ? `PLAYER ${champion} TAKES THE GAUNTLET`
+    : roundWinner && summary.winner === null
+      ? `PLAYER ${roundWinner} TAKES THE ROUND`
+      : summary.title;
+  const titleColor = finale ? (champion === 1 ? C.p1 : C.p2)
+    : roundWinner && summary.winner === null ? (roundWinner === 1 ? C.p1 : C.p2)
+    : summary.color || "";
+  $("gameOverTitle").style.color = titleColor;
+  $("gameOverTitle").style.textShadow = titleColor ? `0 0 34px ${titleColor}66` : "";
+
+  document.querySelector(".result-kicker").textContent = finale
+    ? "GAUNTLET COMPLETE"
+    : playMode === "gauntlet"
+      ? `ROUND ${series.round} RESULT`
+      : summary.coop
+        ? "DIVE COMPLETE"
+        : "MATCH COMPLETE";
 
   const rows = $("gameOverLines");
-  rows.replaceChildren(...summary.rows.map((row) => {
-    const el = document.createElement("div");
-    el.className = "result-row";
-    el.style.setProperty("--accent", row.color || "var(--p1)");
-    el.innerHTML = `<span class="r-tag">${row.tag}</span>
-                    <span class="r-text">${row.text}</span>
-                    <span class="r-val">${row.value}</span>
-                    <span class="r-track"><i></i></span>`;
-    requestAnimationFrame(() => {
-      el.querySelector(".r-track i").style.width = `${clamp01(row.ratio ?? 0) * 100}%`;
-    });
-    return el;
-  }));
+  if (finale) rows.replaceChildren(buildSeriesLog());
+  else rows.replaceChildren(...summary.rows.map(buildResultRow));
+
+  renderSeriesStatus(summary);
+
+  const replay = $("replayBtn");
+  replay.textContent = finale ? "↻ NEW GAUNTLET"
+    : playMode === "gauntlet" ? "▸ NEXT ROUND"
+    : playMode === "shuffle" ? "⚄ DEAL AGAIN"
+    : "↻ REMATCH";
 
   const note = $("recordNote");
   const best = getRecord(currentGame.id);
@@ -511,16 +929,58 @@ function finish() {
   }
 
   setState("over");
-  if (summary.title.includes("DRAW")) sfx.draw();
+  renderSeriesBar(true);   // after setState, which re-renders the bar plainly
+  startAutoNext();
+  if (summary.coop) (summary.success ? sfx.win() : sfx.fail());
+  else if (playMode !== "gauntlet" && summary.winner === null) sfx.draw();
   else sfx.win();
+}
+
+/* ── Hands-free round advance ────────────────────────────────────────
+   In a gauntlet the players are standing back from the device, so the
+   results screen rolls straight on to the next round by itself. The
+   next round then opens with its own briefing, which waits for both
+   players to be tracked — so the whole loop runs without anyone
+   walking back to the keyboard.
+   ─────────────────────────────────────────────────────────────────── */
+const AUTO_NEXT_MS = 9000;
+let autoTimer = null;
+let autoDeadline = 0;
+
+function startAutoNext() {
+  if (playMode !== "gauntlet" || series.over) return;
+  show($("autoNext"));
+  autoDeadline = performance.now() + AUTO_NEXT_MS;
+
+  const step = () => {
+    autoTimer = null;
+    if (state !== "over") { cancelAutoNext(); return; }
+    const left = autoDeadline - performance.now();
+    if (left <= 0) { cancelAutoNext(); nextRound(); return; }
+    $("autoNextText").textContent = `NEXT ROUND IN ${Math.ceil(left / 1000)}`;
+    $("autoBar").style.width = `${(left / AUTO_NEXT_MS) * 100}%`;
+    autoTimer = setTimeout(step, 200);
+  };
+  step();
+}
+
+function cancelAutoNext() {
+  if (autoTimer !== null) clearTimeout(autoTimer);
+  autoTimer = null;
+  hide($("autoNext"));
 }
 
 function returnToMenu() {
   sequenceToken++;
+  finishWarmup();          // release any awaiting launch
   stopLoop();
   stopCamera();
   currentGame = null;
   selectedFactory = null;
+  playMode = "single";
+  resetSeries();
+  cancelAutoNext();
+  hide($("seriesStatus"));
   resetHudCache();
   hide(toast);
   ctx.clearRect(0, 0, view.width, view.height);
@@ -543,12 +1003,18 @@ function resume() {
 
 /* ── Wiring ──────────────────────────────────────────────────────── */
 $("retryBtn").addEventListener("click", () => launch(selectedFactory));
-$("replayBtn").addEventListener("click", () => launch(selectedFactory));
+$("replayBtn").addEventListener("click", () => primaryAction()());
 $("menuBtn").addEventListener("click", returnToMenu);
 $("errorMenuBtn").addEventListener("click", returnToMenu);
 $("pauseMenuBtn").addEventListener("click", returnToMenu);
 $("resumeBtn").addEventListener("click", resume);
+$("briefSkipBtn").addEventListener("click", finishWarmup);
+$("warmMenuBtn").addEventListener("click", returnToMenu);
 quitBtn.addEventListener("click", () => (state === "playing" ? pause() : returnToMenu()));
+
+
+$("gauntletBtn").addEventListener("click", startGauntlet);
+$("shuffleBtn").addEventListener("click", startShuffle);
 
 const muteBtn = $("muteBtn");
 muteBtn.setAttribute("aria-pressed", String(isMuted()));
@@ -572,21 +1038,30 @@ document.addEventListener("keydown", (event) => {
   if (state === "menu") {
     if (key === "ArrowRight" || key === "ArrowDown") { moveCursor(cursor + 1); cards[cursor].el.focus(); sfx.hover(); event.preventDefault(); }
     else if (key === "ArrowLeft" || key === "ArrowUp") { moveCursor(cursor - 1); cards[cursor].el.focus(); sfx.hover(); event.preventDefault(); }
+    else if (key === "g" || key === "G") { startGauntlet(); }
+    else if (key === "r" || key === "R") { startShuffle(); }
     else if (key === "Enter" || key === " ") {
-      // A focused card button already fires its own click for these keys.
-      if (!event.target.closest?.(".channel")) { launch(cards[cursor].factory); event.preventDefault(); }
+      // A focused button already fires its own click for these keys.
+      if (!event.target.closest?.(".channel, .mode-tile")) { startSingle(cards[cursor].factory); event.preventDefault(); }
     }
-    else if (/^[1-9]$/.test(key) && cards[Number(key) - 1]) { moveCursor(Number(key) - 1); launch(cards[cursor].factory); }
+    else if (/^[1-9]$/.test(key) && cards[Number(key) - 1]) { moveCursor(Number(key) - 1); startSingle(cards[cursor].factory); }
+    return;
+  }
+
+  if (state === "warmup" && (key === "Enter" || key === " ")) {
+    finishWarmup();
+    event.preventDefault();
     return;
   }
 
   if (key === "Escape") {
     if (state === "playing") pause();
+    else if (state === "warmup") returnToMenu();
     else if (state === "paused" || state === "over" || state === "error") returnToMenu();
   } else if ((key === "p" || key === "P") && (state === "playing" || state === "paused")) {
     state === "playing" ? pause() : resume();
   } else if (key === "Enter" && state === "over") {
-    launch(selectedFactory);
+    primaryAction()();
   }
 });
 
@@ -623,6 +1098,14 @@ setInterval(() => {
   const seconds = Math.floor((performance.now() - bootTime) / 1000);
   $("clockValue").textContent = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }, 1000);
+
+// The shuffle tile's die keeps rolling while the menu is up.
+const DICE = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+setInterval(() => {
+  if (state !== "menu") return;
+  const die = document.querySelector(".mode-dice");
+  if (die) die.textContent = DICE[Math.floor(Math.random() * DICE.length)];
+}, 900);
 
 // Unlock audio on the first gesture anywhere.
 ["pointerdown", "keydown"].forEach((type) =>

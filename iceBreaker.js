@@ -16,15 +16,24 @@ export function createIceBreaker() {
     blurb: "Hands become hammers. Shatter your whole wall before your rival.",
     players: "2P VS",
     hint: "Both hands up — one player each side",
+    tutorial: [
+      "Both hands become hammers on your half of the wall.",
+      "Move over a block to smash it — thicker ice takes two hits.",
+      "Clear your whole wall first, or break the most before time.",
+    ],
     mode: "hand",
     numHands: 4,
 
-    init({ view }) {
+    init({ view, practice = false }) {
       this.view = view;
+      this.practice = practice;
+      this.drill = [0, 0];
       // One shared layout, so both sides always face the same wall.
-      this.layout = randomLayout();
+      // The warm-up uses thin ice only, so one hit always shows a result.
+      this.layout = practice ? randomLayout().map(() => 1) : randomLayout();
       this.blocks = [buildGrid(view, 0, this.layout), buildGrid(view, 1, this.layout)];
       this.elapsed = 0;
+      this.damage = [0, 0];
       this.hands = [[], []];
       this.fx = createFx();
       this.shake = createShake();
@@ -68,6 +77,7 @@ export function createIceBreaker() {
 
         block.cool = HIT_COOLDOWN_S;
         block.hp -= 1;
+        this.damage[side] += 1;
         block.flashT = 0.16;
         const cx = block.x + block.w / 2;
         const cy = block.y + block.h / 2;
@@ -78,6 +88,7 @@ export function createIceBreaker() {
           this.fx.shards(cx, cy, C.ice, 12);
           this.fx.burst(cx, cy, side === 0 ? C.p1 : C.p2, 6, 130);
           this.shake.add(5);
+          this.drill[side] += 1;
           sfx.smash();
         } else {
           this.fx.shards(cx, cy, C.ice, 4);
@@ -102,6 +113,8 @@ export function createIceBreaker() {
         }
         for (const hand of this.hands[side]) this.strike(side, hand);
       }
+
+      if (this.practice) return;   // no win or clock during the warm-up
 
       const cleared = [this.remaining(0) === 0, this.remaining(1) === 0];
       if (cleared[0] || cleared[1]) {
@@ -142,6 +155,17 @@ export function createIceBreaker() {
       if (shaking) ctx.restore();
     },
 
+    getDrill() {
+      const target = 2;
+      return {
+        label: "SMASH 2 BLOCKS EACH",
+        tip: "Both hands become hammers — sweep them over the ice",
+        target,
+        progress: this.drill,
+        done: this.drill[0] >= target && this.drill[1] >= target,
+      };
+    },
+
     getHud() {
       const total = this.blocks[0].length;
       const pod = (side) => ({
@@ -164,11 +188,14 @@ export function createIceBreaker() {
     getSummary() {
       const total = this.blocks[0].length;
       const broken = [this.broken(0), this.broken(1)];
-      const title = this.winner === 1 ? "PLAYER 1 WINS" : this.winner === 2 ? "PLAYER 2 WINS" : "DRAW";
-      const color = this.winner === 1 ? C.p1 : this.winner === 2 ? C.p2 : C.amber;
+      const winner = this.winner === "draw" ? null : this.winner;
       return {
-        title,
-        color,
+        title: winner ? `PLAYER ${winner} WINS` : "DRAW",
+        color: winner === 1 ? C.p1 : winner === 2 ? C.p2 : C.amber,
+        winner,
+        // Level on cleared blocks? Count every hit landed, including the
+        // ones spent cracking reinforced ice that never fell.
+        tiebreak: [this.damage[0], this.damage[1]],
         record: Math.max(broken[0], broken[1]),
         rows: [
           { tag: "P1", text: `${(broken[0] / Math.max(this.elapsed, 0.1)).toFixed(1)} blocks/sec`, value: `${broken[0]}/${total}`, ratio: broken[0] / total, color: C.p1 },

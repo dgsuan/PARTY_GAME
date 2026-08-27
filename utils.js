@@ -11,14 +11,44 @@ export function dist(a, b) {
 // `view` is the logical CSS-pixel size of the canvas (see main.js) — never
 // canvas.width, which is in device pixels on HiDPI screens.
 export function toCanvasPoint(landmark, view) {
+  // The <video> is laid out with object-fit: cover, so unless the camera
+  // frame happens to match the viewport's aspect ratio it is scaled up and
+  // cropped. Stretching landmarks across the full canvas therefore puts the
+  // cursor somewhere the player's hand is not. Reproduce cover's transform:
+  // scale to fill, centre, crop the overflow — then mirror, because the
+  // video is flipped in CSS so it reads like a mirror.
+  const vw = view.videoWidth || 0;
+  const vh = view.videoHeight || 0;
+  if (vw <= 0 || vh <= 0) {
+    return { x: (1 - landmark.x) * view.width, y: landmark.y * view.height };
+  }
+  const scale = Math.max(view.width / vw, view.height / vh);
+  const drawnW = vw * scale;
+  const drawnH = vh * scale;
+  const offsetX = (view.width - drawnW) / 2;
+  const offsetY = (view.height - drawnH) / 2;
   return {
-    x: (1 - landmark.x) * view.width,
-    y: landmark.y * view.height,
+    x: view.width - (offsetX + landmark.x * drawnW),
+    y: offsetY + landmark.y * drawnH,
   };
+}
+
+// Landmarks are normalised per-axis (x by frame width, y by frame height),
+// so the same physical distance is a smaller number horizontally on a wide
+// frame. Any check that compares an x-distance against a y-distance must
+// first put both in the same units — multiply x by the frame's aspect.
+export function frameAspect(view) {
+  const vw = view.videoWidth || 0;
+  const vh = view.videoHeight || 0;
+  return vw > 0 && vh > 0 ? vw / vh : 16 / 9;
 }
 
 export function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
+}
+
+export function lerp(a, b, t) {
+  return a + (b - a) * t;
 }
 
 export function pickRandom(arr, exclude) {

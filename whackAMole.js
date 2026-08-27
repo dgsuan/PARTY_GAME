@@ -7,8 +7,8 @@ const ROWS = 3;
 const MATCH_TIME = 30;
 const UP_MS_START = 1000;
 const UP_MS_FLOOR = 520;        // moles duck faster as the match goes on
-const SPAWN_MS_START = 780;
-const SPAWN_MS_FLOOR = 340;
+const SPAWN_START = 0.78;       // seconds between spawns, per side
+const SPAWN_FLOOR = 0.34;
 const MAX_ACTIVE_PER_SIDE = 2;  // per side, so neither player can be starved
 const GOLD_CHANCE = 0.16;
 
@@ -20,17 +20,24 @@ export function createWhackAMole() {
     blurb: "Your hands become hammers. Flatten every mole on your half.",
     players: "2P VS",
     hint: "Both hands up — one player each side",
+    tutorial: [
+      "Both hands up — they become hammers on your half.",
+      "Smash moles before the ring around them runs out.",
+      "Gold moles are worth 3 but duck away faster.",
+    ],
     mode: "hand",
     numHands: 4,                // two players × two hands
 
-    init({ view }) {
+    init({ view, practice = false }) {
       this.view = view;
+      this.practice = practice;
+      this.drill = [0, 0];
       this.scores = [0, 0];
       this.hits = [0, 0];
       this.misses = [0, 0];
       this.timeLeft = MATCH_TIME;
       this.elapsed = 0;
-      this.lastSpawn = [0, 0];
+      this.lastSpawn = [0, 0];     // measured against this.elapsed, not wall time
       this.hands = [[], []];
       this.fx = createFx();
       this.shake = createShake();
@@ -66,42 +73,43 @@ export function createWhackAMole() {
     },
 
     upDuration() {
+      if (this.practice) return 2600;      // plenty of time to find the swing
       return Math.max(UP_MS_FLOOR, UP_MS_START - this.elapsed * 16);
     },
 
     spawnInterval() {
-      return Math.max(SPAWN_MS_FLOOR, SPAWN_MS_START - this.elapsed * 15);
+      if (this.practice) return 0.7;
+      return Math.max(SPAWN_FLOOR, SPAWN_START - this.elapsed * 0.015);
     },
 
     update(dt) {
       if (this.over) return;
       this.elapsed += dt;
-      this.timeLeft -= dt;
       this.fx.update(dt);
       this.shake.update(dt);
+      if (!this.practice) this.timeLeft -= dt;
 
-      if (this.timeLeft <= 0) {
+      if (!this.practice && this.timeLeft <= 0) {
         this.timeLeft = 0;
         this.over = true;
         return;
       }
 
-      const now = performance.now();
       const midX = this.view.width / 2;
 
       // Each side spawns on its own clock and its own budget.
       for (const side of [0, 1]) {
         const mine = this.holes.filter((hole) => (hole.x < midX ? 0 : 1) === side);
         const active = mine.filter((hole) => hole.state === "up").length;
-        if (now - this.lastSpawn[side] < this.spawnInterval() || active >= MAX_ACTIVE_PER_SIDE) continue;
+        if (this.elapsed - this.lastSpawn[side] < this.spawnInterval() || active >= MAX_ACTIVE_PER_SIDE) continue;
         const empties = mine.filter((hole) => hole.state === "empty");
         if (empties.length === 0) continue;
         const hole = empties[Math.floor(Math.random() * empties.length)];
         hole.state = "up";
         hole.stateT = 0;
-        hole.gold = Math.random() < GOLD_CHANCE;
+        hole.gold = !this.practice && Math.random() < GOLD_CHANCE;
         hole.upFor = this.upDuration() * (hole.gold ? 0.7 : 1);
-        this.lastSpawn[side] = now;
+        this.lastSpawn[side] = this.elapsed;
       }
 
       for (const hole of this.holes) {
@@ -116,6 +124,7 @@ export function createWhackAMole() {
             hole.stateT = 0;
             this.scores[side] += gain;
             this.hits[side] += 1;
+            this.drill[side] += 1;
             const color = hole.gold ? C.amber : side === 0 ? C.p1 : C.p2;
             this.fx.burst(hole.x, hole.y, color, hole.gold ? 16 : 10, hole.gold ? 250 : 180);
             this.fx.text(hole.x, hole.y - hole.r, `+${gain}`, color);
@@ -219,6 +228,17 @@ export function createWhackAMole() {
       if (shaking) ctx.restore();
     },
 
+    getDrill() {
+      const target = 2;
+      return {
+        label: "WHACK 2 MOLES EACH",
+        tip: "Both hands up — move a hammer onto a mole",
+        target,
+        progress: this.drill,
+        done: this.drill[0] >= target && this.drill[1] >= target,
+      };
+    },
+
     getHud() {
       const top = Math.max(this.scores[0], this.scores[1], 1);
       const pod = (side) => {
@@ -247,12 +267,17 @@ export function createWhackAMole() {
 
     getSummary() {
       const [a, b] = this.scores;
-      const title = a > b ? "PLAYER 1 WINS" : b > a ? "PLAYER 2 WINS" : "DRAW";
-      const color = a > b ? C.p1 : b > a ? C.p2 : C.amber;
+      const winner = a > b ? 1 : b > a ? 2 : null;
       const top = Math.max(a, b, 1);
       return {
-        title,
-        color,
+        title: winner ? `PLAYER ${winner} WINS` : "DRAW",
+        color: winner === 1 ? C.p1 : winner === 2 ? C.p2 : C.amber,
+        winner,
+        // Level on points? Whoever swung more accurately.
+        tiebreak: [0, 1].map((side) => {
+          const attempts = this.hits[side] + this.misses[side];
+          return attempts === 0 ? 0 : this.hits[side] / attempts;
+        }),
         record: Math.max(a, b),
         rows: [
           { tag: "P1", text: `${this.hits[0]} hit · ${this.misses[0]} escaped`, value: `${a} pts`, ratio: a / top, color: C.p1 },

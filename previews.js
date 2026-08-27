@@ -8,10 +8,13 @@ import { C } from "./theme.js";
 const mounted = [];
 let raf = null;
 let startedAt = 0;
+let activeGroup = "menu";
 
-export function mountPreview(canvas, id) {
+// Previews belong to a group ("menu" cards, or the single "brief" demo) so
+// only the visible group is animated.
+export function mountPreview(canvas, id, group = "menu") {
   const ctx = canvas.getContext("2d");
-  const entry = { canvas, ctx, id, w: 0, h: 0 };
+  const entry = { canvas, ctx, id, group, w: 0, h: 0 };
   mounted.push(entry);
   measure(entry);
   return entry;
@@ -31,7 +34,8 @@ export function measurePreviews() {
   for (const entry of mounted) measure(entry);
 }
 
-export function startPreviews() {
+export function startPreviews(group = "menu") {
+  activeGroup = group;
   if (raf !== null) return;
   startedAt = performance.now();
   let last = 0;
@@ -41,6 +45,7 @@ export function startPreviews() {
     last = now;
     const t = (now - startedAt) / 1000;
     for (const entry of mounted) {
+      if (entry.group !== activeGroup) continue;
       if (entry.w === 0) measure(entry);
       entry.ctx.clearRect(0, 0, entry.w, entry.h);
       (RENDERERS[entry.id] || (() => {}))(entry.ctx, entry.w, entry.h, t);
@@ -181,6 +186,52 @@ const RENDERERS = {
       ctx.restore();
     }
     divider(ctx, w, h);
+  },
+  // Water rising behind two leaks; one gets plugged, the level drops.
+  hullbreach(ctx, w, h, t) {
+    const cycle = t % 4;
+    const level = cycle < 2.6 ? 0.18 + cycle * 0.16 : 0.6 - (cycle - 2.6) * 0.3;
+    const waterY = h * (1 - Math.max(0.08, level));
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    ctx.lineTo(0, waterY);
+    for (let x = 0; x <= w; x += 6) {
+      ctx.lineTo(x, waterY + Math.sin(x * 0.09 + t * 3) * 1.8);
+    }
+    ctx.lineTo(w, h);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(127, 216, 255, 0.34)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(200, 240, 255, 0.8)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+
+    const leaks = [[0.3, 0.34], [0.7, 0.26]];
+    leaks.forEach(([fx, fy], i) => {
+      const plugged = i === 0 && cycle > 2.6;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(fx * w, fy * h, 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(4,10,18,0.9)";
+      ctx.fill();
+      ctx.strokeStyle = plugged ? C.p1 : C.danger;
+      ctx.lineWidth = 1.6;
+      ctx.shadowColor = ctx.strokeStyle;
+      ctx.shadowBlur = 7;
+      ctx.stroke();
+      if (!plugged) {
+        ctx.strokeStyle = "rgba(200,240,255,0.6)";
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(fx * w, fy * h);
+        ctx.lineTo(fx * w, fy * h - 9 - Math.sin(t * 8 + i) * 3);
+        ctx.stroke();
+      }
+      ctx.restore();
+    });
   },
 };
 

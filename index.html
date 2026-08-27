@@ -44,6 +44,22 @@
       </div>
     </header>
 
+    <!-- Cross-game series state; only present during a gauntlet -->
+    <div id="seriesBar" class="series hidden">
+      <div class="series-side">
+        <span class="series-tag" data-side="1">P1</span>
+        <span class="lives" id="lives1"></span>
+      </div>
+      <div class="series-center">
+        <span class="series-mode">GAUNTLET</span>
+        <span class="series-round" id="seriesRound">ROUND 1</span>
+      </div>
+      <div class="series-side series-side-right">
+        <span class="lives" id="lives2"></span>
+        <span class="series-tag" data-side="2">P2</span>
+      </div>
+    </div>
+
     <!-- The screen itself -->
     <div class="viewport" id="viewport">
       <video id="webcam" autoplay playsinline muted></video>
@@ -55,8 +71,8 @@
 
       <!-- In-play heads-up display (DOM, so text stays crisp) -->
       <div id="hud" class="hud hidden" aria-hidden="true">
-        <div class="pod pod-1">
-          <span class="pod-tag">P1</span>
+        <div class="pod pod-1" id="hudPod1">
+          <span class="pod-tag" id="hudTag1">P1</span>
           <span class="pod-value" id="hudValue1">0</span>
           <span class="pod-meta" id="hudMeta1"></span>
           <div class="pod-bar"><i id="hudBar1"></i></div>
@@ -71,8 +87,8 @@
           </div>
           <span id="hudCenterLabel" class="pod-meta">TIME</span>
         </div>
-        <div class="pod pod-2">
-          <span class="pod-tag">P2</span>
+        <div class="pod pod-2" id="hudPod2">
+          <span class="pod-tag" id="hudTag2">P2</span>
           <span class="pod-value" id="hudValue2">0</span>
           <span class="pod-meta" id="hudMeta2"></span>
           <div class="pod-bar"><i id="hudBar2"></i></div>
@@ -88,11 +104,34 @@
           <h1>CHANNEL SELECT</h1>
           <p class="sub">Four motion-tracked games. Stand back, use your hands, share the screen.</p>
         </div>
+        <div class="modes">
+          <button id="gauntletBtn" class="mode-tile mode-feature" type="button">
+            <span class="mode-kicker">MAIN EVENT</span>
+            <span class="mode-name">GAUNTLET</span>
+            <span class="mode-sub">Random channels, back to back. Three lives each — lose a match, lose a life. Last player standing takes the deck.</span>
+            <span class="mode-lives" aria-hidden="true">
+              <i class="life" data-side="1"></i><i class="life" data-side="1"></i><i class="life" data-side="1"></i>
+              <b>VS</b>
+              <i class="life" data-side="2"></i><i class="life" data-side="2"></i><i class="life" data-side="2"></i>
+            </span>
+            <span class="mode-go">START GAUNTLET ▸</span>
+          </button>
+          <button id="shuffleBtn" class="mode-tile" type="button">
+            <span class="mode-kicker">CH.RND</span>
+            <span class="mode-name">SHUFFLE</span>
+            <span class="mode-sub">One random channel, dealt by the deck.</span>
+            <span class="mode-dice" aria-hidden="true">⚄</span>
+            <span class="mode-go">DEAL ▸</span>
+          </button>
+        </div>
+        <div class="menu-rule"><span>OR PICK A CHANNEL</span></div>
         <div id="menuGrid" class="channels" role="group" aria-label="Choose a channel"></div>
         <p class="fine">
           <span class="fine-key">◄ ►</span> browse
           <span class="fine-key">ENTER</span> tune in
           <span class="fine-key">1–4</span> jump
+          <span class="fine-key">G</span> gauntlet
+          <span class="fine-key">R</span> shuffle
           <span class="dot-sep"></span>
           Runs entirely on-device. No video ever leaves this browser.
         </p>
@@ -120,6 +159,31 @@
         </div>
       </section>
 
+      <!-- Warm-up: a real, playable slice of the channel. Everything lives
+           in one slim bottom bar — the two halves of the screen are exactly
+           where players reach, so nothing may sit on top of them. The
+           channel name is already in the stage header, and the tutorial
+           lines cycle through the tip slot instead of occupying a card. -->
+      <section id="briefScreen" class="panel panel-warmup hidden">
+        <div class="warm-bar">
+          <span class="warm-badge">WARM<br />UP</span>
+          <div class="warm-mid">
+            <span id="drillLabel" class="drill-label">POP 2 SIGNALS EACH</span>
+            <span id="briefPrompt" class="warm-tip">Try it out</span>
+          </div>
+          <div class="drill-slots">
+            <span class="drill-chip" id="readySlot1" data-state="waiting">
+              <i></i><b id="readyName1">P1</b><em id="readyState1">0/2</em>
+            </span>
+            <span class="drill-chip" id="readySlot2" data-state="waiting">
+              <i></i><b id="readyName2">P2</b><em id="readyState2">0/2</em>
+            </span>
+          </div>
+          <button id="briefSkipBtn" class="btn btn-small" type="button">SKIP</button>
+          <button id="warmMenuBtn" class="btn btn-small btn-ghost" type="button" title="Back to channels">☰</button>
+        </div>
+      </section>
+
       <section id="countScreen" class="panel panel-count hidden">
         <div class="count-ring"><span id="countNum">3</span></div>
         <p id="countHint" class="count-hint">Both players — step into frame</p>
@@ -138,6 +202,12 @@
         <span class="result-kicker">MATCH COMPLETE</span>
         <h1 id="gameOverTitle">GAME OVER</h1>
         <div id="gameOverLines" class="result-rows"></div>
+        <div id="autoNext" class="auto-next hidden">
+          <span id="autoNextText">NEXT ROUND IN 8</span>
+          <div class="auto-bar"><i id="autoBar"></i></div>
+          <span class="auto-hint">stay where you are — no need to touch the device</span>
+        </div>
+        <div id="seriesStatus" class="series-status hidden"></div>
         <div id="recordNote" class="record-note hidden"></div>
         <div class="btn-row">
           <button id="replayBtn" class="btn btn-primary" type="button">↻ REMATCH</button>
@@ -172,6 +242,70 @@
 
   </main>
 </div>
+<!-- ── Failure guard ───────────────────────────────────────────────────
+     A CLASSIC script, deliberately not a module: it still runs when the
+     module below is blocked outright. Opening this file straight from disk
+     (file://) makes the browser refuse every ES module for CORS reasons,
+     which leaves a blank, unresponsive page and an error only visible in
+     the console. This turns that — and any other load failure — into
+     something readable on screen.
+     ──────────────────────────────────────────────────────────────────── -->
+<script>
+(function () {
+  function panic(title, detail, steps) {
+    var wrap = document.createElement("div");
+    wrap.setAttribute("style", [
+      "position:fixed", "inset:0", "z-index:99999", "overflow:auto",
+      "background:#07070d", "color:#e9ecff", "padding:8vh 6vw",
+      "font-family:ui-monospace,Menlo,monospace", "font-size:14px", "line-height:1.7"
+    ].join(";"));
+    var list = steps.map(function (s) { return "<li style=\"margin:6px 0\">" + s + "</li>"; }).join("");
+    wrap.innerHTML =
+      "<div style=\"max-width:760px;margin:0 auto\">" +
+        "<div style=\"color:#ff4d4d;letter-spacing:.3em;font-size:11px\">SIGNAL ARCADE — CANNOT START</div>" +
+        "<h1 style=\"font-size:26px;letter-spacing:.12em;margin:14px 0\">" + title + "</h1>" +
+        "<p style=\"color:#878ec2;margin:0 0 18px\">" + detail + "</p>" +
+        "<ol style=\"color:#e9ecff;padding-left:20px;margin:0\">" + list + "</ol>" +
+      "</div>";
+    (document.body || document.documentElement).appendChild(wrap);
+  }
+
+  if (location.protocol === "file:") {
+    panic(
+      "This page must be served over http://",
+      "It is open as a <b>file://</b> URL. Browsers block ES modules and camera access on file:// URLs, so nothing on the page can run. Serve the folder instead:",
+      [
+        "Open Terminal in this folder: <b>cd " + "~/Desktop/otnis" + "</b>",
+        "Run: <b>python3 serve.py</b>",
+        "Open: <b>http://localhost:8124</b>",
+        "(In VS Code you can also right-click index.html and choose <b>Open with Live Server</b>.)"
+      ]
+    );
+    return;
+  }
+
+  // Surface anything that fails to load or throws during startup.
+  window.addEventListener("error", function (event) {
+    var target = event.target;
+    if (target && (target.tagName === "SCRIPT" || target.tagName === "LINK")) {
+      panic("A required file failed to load",
+            "The browser could not fetch <b>" + (target.src || target.href) + "</b>.",
+            ["Check the server is still running.", "Check your network connection — the tracking model loads from a CDN.", "Reload the page."]);
+      return;
+    }
+    if (event.message) {
+      panic("Startup error", "<b>" + event.message + "</b>",
+            ["This is a bug, not a setup problem.", "Open the browser console for the full stack trace."]);
+    }
+  }, true);
+
+  window.addEventListener("unhandledrejection", function (event) {
+    var reason = event.reason && (event.reason.message || event.reason);
+    panic("Startup failed", "<b>" + reason + "</b>",
+          ["If this mentions the network, the tracking model could not be downloaded.", "Check your connection and reload."]);
+  });
+})();
+</script>
 <script type="module" src="main.js"></script>
 </body>
 </html>

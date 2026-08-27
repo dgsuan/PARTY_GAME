@@ -103,6 +103,11 @@ export const sfx = {
   charge: () => tone({ freq: 300, to: 520, type: "sine", dur: 0.3, gain: 0.06 }),
   fail: () => { tone({ freq: 300, to: 90, type: "sawtooth", dur: 0.4, gain: 0.22 }); },
 
+  // hull breach
+  leak: () => noise({ dur: 0.4, gain: 0.16, freq: 2600, sweepTo: 5200, q: 0.7 }),
+  seal: () => { tone({ freq: 520, to: 240, type: "sine", dur: 0.18, gain: 0.2 }); noise({ dur: 0.12, gain: 0.14, freq: 900, sweepTo: 300 }); },
+  alarm: () => [0, 0.26].forEach((d) => { tone({ freq: 720, to: 480, type: "square", dur: 0.22, gain: 0.16, delay: d }); }),
+
   // results
   win: () => [0, 0.11, 0.22, 0.38].forEach((d, i) => tone({ freq: [523, 659, 784, 1047][i], type: "triangle", dur: 0.3, gain: 0.16, delay: d })),
   draw: () => [0, 0.12].forEach((d, i) => tone({ freq: [523, 523][i], type: "triangle", dur: 0.22, gain: 0.14, delay: d })),
