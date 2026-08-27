@@ -12,11 +12,11 @@ import { POSES, getPoints, bodyUnit, createPoseTracker, drawSkeleton, drawStickF
    same round the deeper run takes it.
    ═══════════════════════════════════════════════════════════════════ */
 
-const SHOW_TIME = 0.85;       // how long each pose is displayed
+const SHOW_TIME = 0.72;       // was 0.85 — -15% to memorise
 const SHOW_GAP = 0.2;
 const HOLD_TIME = 0.3;        // hold to register a pose
-const ANSWER_TIME = 6;        // seconds allowed per pose when answering
-const START_LENGTH = 2;
+const ANSWER_TIME = 5.1;      // was 6 — -15% reaction window
+const START_LENGTH = 3;       // was 2 — opens one pose deeper
 const MAX_ROUNDS = 12;
 
 export function createEcho() {

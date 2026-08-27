@@ -4,9 +4,9 @@ import { sfx } from "./audio.js";
 
 const COLS_PER_SIDE = 4;
 const ROWS = 4;
-const MAX_TIME = 45;
-const REINFORCED_CHANCE = 0.28;   // thicker ice, two hits to clear
-const HIT_COOLDOWN_S = 0.13;      // per block, so a hover isn't a machine gun
+const MAX_TIME = 38;              // -15% time limit
+const REINFORCED_CHANCE = 0.4;    // was 0.28 — more two-hit ice
+const HIT_COOLDOWN_S = 0.15;      // was 0.13 — -15% swing rate
 
 export function createIceBreaker() {
   return {

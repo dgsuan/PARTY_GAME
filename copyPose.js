@@ -4,11 +4,28 @@ import { sfx } from "./audio.js";
 import {
   POSES, bodyUnit, getPoints, createPoseTracker, drawSkeleton, drawStickFigure,
 } from "./poseKit.js";
+import { EXTRA_POSES, mirrorPose } from "./poseLibrary.js";
 
+/* ── CONFIG ─────────────────────────────────────────────────────────
+   The per-pose window is 1 / START_SPEED seconds: the time the wall
+   takes to reach you. That is the "time limit" a player actually feels.
+   ────────────────────────────────────────────────────────────────── */
 const MATCH_TIME = 40;
-const START_SPEED = 0.11;   // progress/sec toward the danger line
+const START_SPEED = 0.141;  // 7.1s per pose — was 0.11 (9.1s), so -2s
 const SPEED_STEP = 0.018;   // added per successful pose
 const HOLD_TIME = 0.35;     // seconds a pose must be held to count
+const MIRROR_CHANCE = 0.5;  // chance an asymmetric pose is flipped
+
+// Copy the Pose draws on a much wider pool than the other pose channels.
+// Kept local so Echo and Vault Sync are untouched by the expansion.
+const POSE_POOL = [...POSES, ...EXTRA_POSES];
+
+// Half of all asymmetric poses arrive mirrored, doubling what players see
+// without adding a single new definition.
+function dealPose(previous) {
+  const base = pickRandom(POSE_POOL, previous?.base ?? previous);
+  return Math.random() < MIRROR_CHANCE ? mirrorPose(base) : base;
+}
 
 export function createCopyPose() {
   return {
@@ -84,7 +101,7 @@ export function createCopyPose() {
             player.winT = 0.45;
             // Each player advances their *own* target: one player clearing a
             // pose must not swap the other player's target mid-attempt.
-            player.current = pickRandom(POSES, player.current);
+            player.current = dealPose(player.current);
             const x = this.view.width * (index === 0 ? 0.25 : 0.75);
             this.fx.burst(x, this.view.height * 0.45, index === 0 ? C.p1 : C.p2, 14, 210);
             this.fx.text(x, this.view.height * 0.4, "+1", index === 0 ? C.p1 : C.p2);
@@ -98,7 +115,7 @@ export function createCopyPose() {
           player.stuckT = player.matched ? 0 : (player.stuckT || 0) + dt;
           if (player.stuckT > 10) {
             player.stuckT = 0;
-            player.current = pickRandom(POSES, player.current);
+            player.current = dealPose(player.current);
           }
         }
 
@@ -111,7 +128,7 @@ export function createCopyPose() {
           player.progress = 0;
           player.holdTimer = 0;
           player.speed = Math.max(START_SPEED, player.speed - SPEED_STEP);
-          player.current = pickRandom(POSES, player.current);
+          player.current = dealPose(player.current);
           sfx.fail();
         }
       }
@@ -308,6 +325,6 @@ function createPlayer() {
     matched: false,
     flashT: 0,
     winT: 0,
-    current: POSES[Math.floor(Math.random() * POSES.length)],
+    current: dealPose(null),
   };
 }

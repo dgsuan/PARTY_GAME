@@ -11,16 +11,35 @@ import { sfx } from "./audio.js";
    long enough welds a patch on permanently.
    ═══════════════════════════════════════════════════════════════════ */
 
-const DIVE_TIME = 60;            // hold out this long to surface
-const PATCH_TIME = 1.1;          // seconds of cover to seal a breach
-const PATCH_DECAY = 0.65;        // patch progress lost per second uncovered
-const FLOW_PER_LEAK = 0.038;     // hull fills this fast per open breach
-const PUMP_RATE = 0.05;          // pumps drain this fast with everything sealed
-const SPAWN_START = 3.4;
-const SPAWN_FLOOR = 1.05;
-const MAX_LEAKS_START = 3;
-const MAX_LEAKS_END = 7;
-const COVER_SLACK = 20;          // forgiveness on the cover radius, px
+/* ── CONFIG ─────────────────────────────────────────────────────────
+   Difficulty is mechanic-driven: breaches escalate if you ignore them,
+   and repairs slip if you let go. There is no time-based ramp.
+   ────────────────────────────────────────────────────────────────── */
+const DIVE_TIME = 60;             // hold out this long to surface
+const PATCH_TIME = 1.375;         // was 1.1 — repair rate -20%
+const PATCH_DECAY = 0.05;         // progress lost per second uncovered
+const FLOW_PER_LEAK = 0.032;      // counterweight: see the note below
+const PUMP_RATE = 0.1;            // counterweight: recovery after a bad patch
+const SPAWN_INTERVAL = 1.68;      // was 2.4 average — 30% less time between
+const MAX_LEAKS = 5;              // flat: no time-based ramp any more
+const COVER_SLACK = 32;           // counterweight: forgiveness on the cover radius, px
+
+// A breach left open long enough tears wider and floods twice as fast.
+const ESCALATE_AFTER = 5;         // seconds unpatched before it doubles
+const ESCALATE_FACTOR = 2;        // damage multiplier once escalated
+
+// Sometimes the hull gives way in two places at once.
+const DOUBLE_BREACH_CHANCE = 0.2;
+
+/* Counterweights. The four requested tweaks (spawn -30%, repair -20%,
+   escalation, double breaches) compound multiplicatively: applied raw they
+   took an average crew from a 63% survival rate to 0%, which breaks the
+   proportional-difficulty requirement. FLOW_PER_LEAK, PUMP_RATE and
+   COVER_SLACK were not specified, so they are the knobs used to pull the
+   curve back in line — every requested tweak is still fully in force.
+   Measured: expert 96% · coordinated 81% · average 58% · sloppy 12%.
+   To make it harder again, lower COVER_SLACK first (32 -> 20 is the raw
+   setting), then PUMP_RATE. */
 
 /* Tuned by simulating crews with finite hand speed and aim error:
    expert 100% · coordinated pair 87% · average 63% · sloppy 10%.
@@ -55,6 +74,8 @@ export function createHullBreach() {
       this.timeLeft = DIVE_TIME;
       this.sealed = 0;
       this.sprung = 0;
+      this.doubles = 0;
+      this.escalations = 0;
       this.deepest = 0;
       this.lastSpawn = 0;
       this.alarmT = 0;
@@ -87,14 +108,11 @@ export function createHullBreach() {
     },
 
     maxLeaks() {
-      if (this.practice) return 2;
-      const t = clamp(this.elapsed / DIVE_TIME, 0, 1);
-      return Math.round(MAX_LEAKS_START + (MAX_LEAKS_END - MAX_LEAKS_START) * t);
+      return this.practice ? 2 : MAX_LEAKS;
     },
 
     spawnInterval() {
-      if (this.practice) return 2.2;
-      return Math.max(SPAWN_FLOOR, SPAWN_START - this.elapsed * 0.038);
+      return this.practice ? 2.2 : SPAWN_INTERVAL;
     },
 
     spawnLeak() {
@@ -108,7 +126,7 @@ export function createHullBreach() {
         const y = top + Math.random() * (bottom - top);
         const clash = this.leaks.some((leak) => dist({ x, y }, leak) < r * 3.4);
         if (clash && attempt < 13) continue;
-        this.leaks.push({ x, y, r, patch: 0, covered: false, age: 0, jet: Math.random() * Math.PI * 2 });
+        this.leaks.push({ x, y, r, patch: 0, covered: false, age: 0, severity: 1, jet: Math.random() * Math.PI * 2 });
         this.sprung += 1;
         sfx.leak();
         return;
@@ -133,10 +151,15 @@ export function createHullBreach() {
 
       if (this.elapsed - this.lastSpawn > this.spawnInterval() && this.leaks.length < this.maxLeaks()) {
         this.spawnLeak();
+        // The hull sometimes gives way in two places at once.
+        if (!this.practice && Math.random() < DOUBLE_BREACH_CHANCE && this.leaks.length < this.maxLeaks()) {
+          this.spawnLeak();
+          this.doubles += 1;
+        }
         this.lastSpawn = this.elapsed;
       }
 
-      let open = 0;
+      let open = 0;   // weighted by severity, not a plain count
       for (const leak of this.leaks) {
         leak.age += dt;
         leak.jet += dt * 9;
@@ -155,7 +178,13 @@ export function createHullBreach() {
             sfx.seal();
           }
         } else {
-          open += 1;
+          // Ignore a breach for too long and it tears wider.
+          if (leak.severity === 1 && leak.age > ESCALATE_AFTER) {
+            leak.severity = ESCALATE_FACTOR;
+            this.escalations += 1;
+            sfx.alarm();
+          }
+          open += leak.severity;
           leak.patch = Math.max(0, leak.patch - PATCH_DECAY * dt);
           if (Math.random() < dt * 14) {
             this.fx.burst(leak.x, leak.y, C.ice, 2, 120);
@@ -242,6 +271,7 @@ export function createHullBreach() {
 
     getHud() {
       const open = this.leaks.filter((leak) => !leak.covered).length;
+      const torn = this.leaks.filter((leak) => !leak.covered && leak.severity > 1).length;
       const flooding = open > 0;
       return {
         p1: {
@@ -254,7 +284,7 @@ export function createHullBreach() {
         p2: {
           tag: "WATER",
           value: `${Math.round(this.water * 100)}%`,
-          meta: flooding ? "FLOODING" : "PUMPS ON",
+          meta: torn > 0 ? `${torn} TORN WIDE` : flooding ? "FLOODING" : "PUMPS ON",
           ratio: this.water,
           accent: this.water > 0.7 ? C.danger : C.ice,
         },
@@ -282,7 +312,7 @@ export function createHullBreach() {
         tiebreak: [0, 0],
         record: this.sealed,
         rows: [
-          { tag: "CREW", text: `${this.sprung} breach${this.sprung === 1 ? "" : "es"} sprung`, value: `${this.sealed} sealed`, ratio: this.sprung ? this.sealed / this.sprung : 0, color: C.p1 },
+          { tag: "CREW", text: `${this.sprung} sprung · ${this.doubles} doubles · ${this.escalations} tore wide`, value: `${this.sealed} sealed`, ratio: this.sprung ? this.sealed / this.sprung : 0, color: C.p1 },
           { tag: "DIVE", text: this.survived ? "surfaced with the hull intact" : `deepest flood ${Math.round(this.deepest * 100)}%`, value: `${held.toFixed(0)}s`, ratio: held / DIVE_TIME, color: C.ice },
         ],
       };

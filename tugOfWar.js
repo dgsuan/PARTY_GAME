@@ -11,9 +11,9 @@ import { sfx } from "./audio.js";
    the natural short round between longer ones.
    ═══════════════════════════════════════════════════════════════════ */
 
-const MATCH_TIME = 25;
-const PULL_RATE = 0.042;     // rope travel per unit of net effort per second
-const DECAY = 0.1;           // rope eases back to centre when both rest
+const MATCH_TIME = 21;       // -16% time limit
+const PULL_RATE = 0.0378;    // was 0.042 — -10%, the rope is heavier
+const DECAY = 0.115;         // was 0.1 — +15%, the rope slides back faster
 const EFFORT_CAP = 9;        // stops one frantic hand dominating
 const SMOOTH = 0.3;
 

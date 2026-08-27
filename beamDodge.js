@@ -13,10 +13,11 @@ import { IDX, createPoseTracker, drawSkeleton } from "./poseKit.js";
    ═══════════════════════════════════════════════════════════════════ */
 
 const MATCH_TIME = 45;
-const SPAWN_START = 3.2;
-const SPAWN_FLOOR = 1.3;
-const GRACE = 0.7;               // invulnerable window after taking a hit
+const SPAWN_START = 2.67;        // -20% gap between beams
+const SPAWN_FLOOR = 1.08;        // -20% gap between beams
+const GRACE = 0.6;               // was 0.7 — -15% mercy window
 const BAND = 34;                 // beam thickness, px
+const GAP_WIDTH = 0.27;          // was 0.3 — -10% gap to slip through
 
 export function createBeamDodge() {
   return {
@@ -68,8 +69,8 @@ export function createBeamDodge() {
       // Low bars need a crouch, which is harder, so they stay rarer.
       const low = !this.practice && Math.random() < 0.3;
       this.beams[side].push(low
-        ? { kind: "low", t: 0, speed: 0.34 + Math.random() * 0.14, hit: false }
-        : { kind: "wall", t: 0, speed: 0.3 + Math.random() * 0.16, gap: 0.18 + Math.random() * 0.64, width: 0.3, hit: false });
+        ? { kind: "low", t: 0, speed: 0.39 + Math.random() * 0.16, hit: false }
+        : { kind: "wall", t: 0, speed: 0.35 + Math.random() * 0.18, gap: 0.18 + Math.random() * 0.64, width: GAP_WIDTH, hit: false });
       sfx.leak();
     },
 

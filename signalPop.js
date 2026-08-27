@@ -1,16 +1,27 @@
 import { toCanvasPoint, dist, createFx, createShake, clamp } from "./utils.js";
 import { C, drawDivider, drawBrackets } from "./theme.js";
 import { sfx } from "./audio.js";
+import { BASE_SPAWN_INTERVAL } from "./balance.js";
 
-const BUBBLE_MIN_R = 20;
-const BUBBLE_MAX_R = 38;
-const SPAWN_START = 0.62;       // seconds between spawns at kickoff
-const SPAWN_FLOOR = 0.28;       // spawn rate tightens as the clock runs down
+/* ── CONFIG ──────────────────────────────────────────────────────────
+   Tuning values for this channel. BASE_SPAWN_INTERVAL is shared with
+   Whack-a-Mole (see balance.js) and must not be overridden here.
+   ─────────────────────────────────────────────────────────────────── */
+const BUBBLE_MIN_R = 18;          // was 20  (-10% size)
+const BUBBLE_MAX_R = 34.2;        // was 38  (-10% size)
+const RISE_MIN = 66;              // was 60  (+10% speed)
+const RISE_SPREAD = 77;           // was 70  (+10% speed)
 const BOMB_CHANCE = 0.2;
 const BOMB_PENALTY = 5;
 const MATCH_TIME = 30;
 const STREAK_FOR_X2 = 5;
 const STREAK_FOR_X3 = 12;
+
+// Escape escalation: a bubble that reaches the top speeds up spawning for
+// everyone. Difficulty now comes from letting signals through, not from
+// the clock — there is no time-based ramp any more.
+const ESCAPE_SPAWN_BOOST = 1.15;  // spawn rate x1.15 while active
+const ESCAPE_BOOST_TIME = 5;      // seconds the boost lasts
 
 export function createSignalPop() {
   return {
@@ -39,6 +50,8 @@ export function createSignalPop() {
       this.bubbles = [];
       this.tips = [null, null];
       this.lastSpawn = 0;          // measured against this.elapsed, not wall time
+      this.escapeBoostT = 0;       // seconds left on the escape speed-up
+      this.escaped = [0, 0];
       this.elapsed = 0;
       this.fx = createFx();
       this.shake = createShake();
@@ -79,7 +92,7 @@ export function createSignalPop() {
         x: r + Math.random() * (this.view.width - 2 * r),
         y: this.view.height + r,
         r,
-        vy: 60 + Math.random() * 70 + this.elapsed * 1.6,
+        vy: RISE_MIN + Math.random() * RISE_SPREAD,
         wobble: Math.random() * Math.PI * 2,
         type,
         popped: false,
@@ -92,6 +105,7 @@ export function createSignalPop() {
       this.elapsed += dt;
       this.fx.update(dt);
       this.shake.update(dt);
+      if (this.escapeBoostT > 0) this.escapeBoostT -= dt;
       if (this.practice) this.lastSpawn = Math.min(this.lastSpawn, this.elapsed);
       else this.timeLeft -= dt;
 
@@ -101,7 +115,8 @@ export function createSignalPop() {
         return;
       }
 
-      const interval = this.practice ? 0.8 : Math.max(SPAWN_FLOOR, SPAWN_START - this.elapsed * 0.011);
+      const boosted = this.escapeBoostT > 0 ? ESCAPE_SPAWN_BOOST : 1;
+      const interval = this.practice ? 0.8 : BASE_SPAWN_INTERVAL / boosted;
       if (this.elapsed - this.lastSpawn > interval) {
         this.spawnBubble();
         this.lastSpawn = this.elapsed;
@@ -144,6 +159,13 @@ export function createSignalPop() {
         }
       }
 
+      for (const bubble of this.bubbles) {
+        if (bubble.popped || bubble.y + bubble.r > -20) continue;
+        // Reached the top unpopped — refresh the boost rather than stacking,
+        // so a bad patch cannot spiral out of control.
+        this.escapeBoostT = ESCAPE_BOOST_TIME;
+        this.escaped[bubble.x < this.view.width / 2 ? 0 : 1] += 1;
+      }
       this.bubbles = this.bubbles.filter((b) => (b.popped ? b.popT < 0.3 : b.y + b.r > -20));
     },
 
@@ -281,7 +303,7 @@ export function createSignalPop() {
         p2: pod(1),
         center: {
           value: Math.ceil(this.timeLeft),
-          label: "TIME",
+          label: this.escapeBoostT > 0 ? "SURGE" : "TIME",
           ratio: this.timeLeft / MATCH_TIME,
           danger: this.timeLeft <= 6,
         },
@@ -304,8 +326,8 @@ export function createSignalPop() {
         tiebreak: [this.best[0], this.best[1]],
         record: Math.max(a, b),
         rows: [
-          { tag: "P1", text: `best streak ${this.best[0]}`, value: `${a} pts`, ratio: a / top, color: C.p1 },
-          { tag: "P2", text: `best streak ${this.best[1]}`, value: `${b} pts`, ratio: b / top, color: C.p2 },
+          { tag: "P1", text: `best streak ${this.best[0]} · ${this.escaped[0]} escaped`, value: `${a} pts`, ratio: a / top, color: C.p1 },
+          { tag: "P2", text: `best streak ${this.best[1]} · ${this.escaped[1]} escaped`, value: `${b} pts`, ratio: b / top, color: C.p2 },
         ],
       };
     },

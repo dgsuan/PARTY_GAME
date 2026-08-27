@@ -15,9 +15,9 @@ import { getPoints, createPoseTracker, createMotionMeter, drawSkeleton } from ".
 const MATCH_TIME = 60;
 const GOAL = 1;                  // progress needed to win
 const GAIN_PER_MOTION = 0.022;   // advance rate while moving on green
-const PENALTY = 0.13;            // progress lost for twitching on red
-const MOVE_THRESHOLD = 0.55;     // body units/sec that counts as moving
-const FLINCH_GRACE = 0.18;       // must exceed the threshold this long
+const PENALTY = 0.15;            // was 0.13 — costlier twitch
+const MOVE_THRESHOLD = 0.47;     // was 0.55 — -15%, stricter stillness
+const FLINCH_GRACE = 0.15;       // was 0.18 — -15% reaction window
 const GREEN_MIN = 1.8, GREEN_MAX = 4.2;
 const RED_MIN = 1.6, RED_MAX = 3.4;
 const WARN = 0.7;                // amber warning before red lands

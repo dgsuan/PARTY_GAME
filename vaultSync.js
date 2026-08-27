@@ -12,10 +12,10 @@ import { POSES, getPoints, bodyUnit, createPoseTracker, drawSkeleton, drawStickF
    player alone can do nothing at all.
    ═══════════════════════════════════════════════════════════════════ */
 
-const VAULT_TIME = 75;
+const VAULT_TIME = 64;        // -15% time limit
 const TUMBLERS = 8;
-const HOLD_TIME = 1.3;        // seconds both must hold together
-const DECAY = 1.6;            // sync lost per second when out of step
+const HOLD_TIME = 1.5;        // was 1.3 — +15% joint hold
+const DECAY = 1.85;           // was 1.6 — +15%, sync slips faster
 
 export function createVaultSync() {
   return {
