@@ -1,72 +1,14 @@
-import { toCanvasPoint, createFx, pickRandom, clamp, lerp, frameAspect } from "./utils.js";
+import { createFx, pickRandom } from "./utils.js";
 import { C } from "./theme.js";
 import { sfx } from "./audio.js";
-
-const IDX = { nose: 0, ls: 11, rs: 12, le: 13, re: 14, lw: 15, rw: 16, lh: 23, rh: 24 };
-const BONES = [
-  ["ls", "rs"], ["ls", "lh"], ["rs", "rh"], ["lh", "rh"],
-  ["ls", "le"], ["le", "lw"], ["rs", "re"], ["re", "rw"],
-];
+import {
+  POSES, bodyUnit, getPoints, createPoseTracker, drawSkeleton, drawStickFigure,
+} from "./poseKit.js";
 
 const MATCH_TIME = 40;
 const START_SPEED = 0.11;   // progress/sec toward the danger line
 const SPEED_STEP = 0.018;   // added per successful pose
 const HOLD_TIME = 0.35;     // seconds a pose must be held to count
-const MIN_VISIBILITY = 0.5;
-
-/* ── Body-relative measurement ───────────────────────────────────────
-   Landmarks are normalized to the *frame*, so a player standing further
-   away — or sharing the frame with a second player — produces smaller
-   deltas for the exact same gesture. Fixed thresholds therefore fail for
-   whoever is smaller on screen. Every check below is expressed in "body
-   units" instead: one unit ≈ the player's torso, so a pose registers the
-   same whether they fill the frame or half of it.
-   Points are also aspect-corrected before measuring (see getPoints): x is
-   normalised by frame width and y by frame height, so on a 16:9 camera a
-   T-pose's horizontal reach reads ~44% smaller than the identical distance
-   measured vertically. Without that correction the T-POSE check is
-   unreachable for anyone not filling the frame.
-   ─────────────────────────────────────────────────────────────────── */
-function bodyUnit(p) {
-  const shoulderMid = { x: (p.ls.x + p.rs.x) / 2, y: (p.ls.y + p.rs.y) / 2 };
-  const hipMid = { x: (p.lh.x + p.rh.x) / 2, y: (p.lh.y + p.rh.y) / 2 };
-  const torso = Math.hypot(shoulderMid.x - hipMid.x, shoulderMid.y - hipMid.y);
-  const shoulders = Math.hypot(p.ls.x - p.rs.x, p.ls.y - p.rs.y);
-  return Math.max(0.06, torso, shoulders * 0.85);
-}
-
-const gap = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-
-const POSES = [
-  {
-    id: "armsup",
-    label: "ARMS UP",
-    check: (p, u) => p.lw.y < p.ls.y - 0.25 * u && p.rw.y < p.rs.y - 0.25 * u,
-    arms: { la: -0.9, ra: -0.9 },
-  },
-  {
-    id: "tpose",
-    label: "T-POSE",
-    check: (p, u) =>
-      Math.abs(p.lw.y - p.ls.y) < 0.45 * u &&
-      Math.abs(p.rw.y - p.rs.y) < 0.45 * u &&
-      Math.abs(p.lw.x - p.ls.x) > 0.7 * u &&
-      Math.abs(p.rw.x - p.rs.x) > 0.7 * u,
-    arms: { la: 0, ra: 0 },
-  },
-  {
-    id: "onearm",
-    label: "RIGHT ARM UP",
-    check: (p, u) => p.rw.y < p.rs.y - 0.25 * u && p.lw.y > p.lh.y - 0.15 * u,
-    arms: { la: 0.9, ra: -0.9 },
-  },
-  {
-    id: "handsonhead",
-    label: "HANDS ON HEAD",
-    check: (p, u) => gap(p.lw, p.nose) < 0.75 * u && gap(p.rw, p.nose) < 0.75 * u,
-    arms: { la: -1.6, ra: -1.6 },
-  },
-];
 
 export function createCopyPose() {
   return {
@@ -88,7 +30,8 @@ export function createCopyPose() {
       this.view = view;
       this.practice = practice;
       this.drill = [0, 0];
-      this.players = [createPlayer(0.25), createPlayer(0.75)];
+      this.players = [createPlayer(), createPlayer()];
+      this.tracker = createPoseTracker();
       // The warm-up freezes the wall: learn the pose without the pressure.
       // It also opens on ARMS UP, the easiest pose to perform and the one
       // the tracker reads most reliably.
@@ -107,69 +50,10 @@ export function createCopyPose() {
       this.view = view;
     },
 
-    /* ── Player identity ─────────────────────────────────────────────
-       Sorting detections by x and assigning by index swaps the two
-       players the instant they drift past each other or overlap — the
-       target, the wall and the score all jump to the wrong half.
-       Instead each player keeps an "anchor": a smoothed screen-space
-       centre for whoever owns that side. Detections are matched to the
-       anchors by nearest total distance, so identity survives players
-       standing close together, crossing, or briefly merging.
-       ─────────────────────────────────────────────────────────────── */
     onResults(poses) {
-      for (const player of this.players) player.landmarks = null;
-
-      const detected = poses
-        .filter((pose) => isUsable(pose))
-        .map((pose) => ({ pose, cx: this.poseCenter(pose) }));
-
-      if (detected.length === 0) return;
-
-      if (detected.length === 1) {
-        const [only] = detected;
-        const side = Math.abs(only.cx - this.players[0].anchor) <= Math.abs(only.cx - this.players[1].anchor) ? 0 : 1;
-        this.claim(side, only, true);
-        return;
-      }
-
-      // Two candidates: pick the pairing with the lower total anchor cost.
-      const [a, b] = detected.slice(0, 2);
-      const straight = Math.abs(a.cx - this.players[0].anchor) + Math.abs(b.cx - this.players[1].anchor);
-      const swapped = Math.abs(b.cx - this.players[0].anchor) + Math.abs(a.cx - this.players[1].anchor);
-      const [first, second] = straight <= swapped ? [a, b] : [b, a];
-
-      // When the two are practically on top of each other the pairing is a
-      // coin flip, so hold the anchors still rather than corrupting them.
-      const separated = Math.abs(a.cx - b.cx) > 0.1;
-      this.claim(0, first, separated);
-      this.claim(1, second, separated);
-    },
-
-    claim(side, detection, moveAnchor) {
-      const player = this.players[side];
-      player.landmarks = detection.pose;
-      if (moveAnchor) player.anchor = clamp(lerp(player.anchor, detection.cx, 0.15), 0.05, 0.95);
-    },
-
-    // Mirrored screen-space centre of a pose, 0 (left) to 1 (right).
-    poseCenter(pose) {
-      const shoulderCenter = (pose[IDX.ls].x + pose[IDX.rs].x) / 2;
-      const hipCenter = (pose[IDX.lh].x + pose[IDX.rh].x) / 2;
-      return 1 - (shoulderCenter + hipCenter) / 2;
-    },
-
-    // Returns landmarks in a square measuring space, so horizontal and
-    // vertical distances are directly comparable.
-    getPoints(landmarks) {
-      if (!landmarks) return null;
-      const aspect = frameAspect(this.view);
-      const points = {};
-      for (const [name, index] of Object.entries(IDX)) {
-        const landmark = landmarks[index];
-        if (!landmark) return null;
-        points[name] = { x: landmark.x * aspect, y: landmark.y };
-      }
-      return points;
+      const assigned = this.tracker.assign(poses);
+      this.players[0].landmarks = assigned[0];
+      this.players[1].landmarks = assigned[1];
     },
 
     update(dt) {
@@ -186,7 +70,7 @@ export function createCopyPose() {
         if (player.flashT > 0) player.flashT -= dt;
         if (player.winT > 0) player.winT -= dt;
 
-        const points = this.getPoints(player.landmarks);
+        const points = getPoints(player.landmarks, this.view);
         player.matched = !!points && player.current.check(points, bodyUnit(points));
 
         if (player.matched) {
@@ -246,7 +130,12 @@ export function createCopyPose() {
         const wallY = 44 + player.progress * (dangerY - 74);
         const urgency = player.progress;
 
-        if (player.landmarks) this.drawSkeleton(ctx, player, accent);
+        if (player.landmarks) {
+          drawSkeleton(ctx, player.landmarks, this.view, {
+            color: player.matched ? C.p1 : "rgba(233, 236, 255, 0.75)",
+            glow: player.matched ? 16 : 8,
+          });
+        }
 
         ctx.save();
         const grad = ctx.createLinearGradient(0, wallY - 70, 0, wallY + 70);
@@ -267,7 +156,8 @@ export function createCopyPose() {
         ctx.stroke();
         ctx.restore();
 
-        drawTarget(ctx, centerX, wallY, 30, player);
+        drawStickFigure(ctx, centerX, wallY, 30, player.current.arms,
+          player.matched ? C.p1 : "#ffffff", player.matched ? 18 : 10);
 
         ctx.save();
         ctx.font = '700 14px "Space Grotesk", sans-serif';
@@ -348,36 +238,6 @@ export function createCopyPose() {
       ctx.restore();
     },
 
-    drawSkeleton(ctx, player, accent) {
-      const color = player.matched ? C.p1 : "rgba(233, 236, 255, 0.75)";
-      const points = {};
-      for (const [name, index] of Object.entries(IDX)) {
-        const landmark = player.landmarks[index];
-        if (landmark) points[name] = toCanvasPoint(landmark, this.view);
-      }
-      ctx.save();
-      ctx.strokeStyle = color;
-      ctx.shadowColor = player.matched ? C.p1 : accent;
-      ctx.shadowBlur = player.matched ? 16 : 8;
-      ctx.lineWidth = 3;
-      ctx.lineCap = "round";
-      for (const [a, b] of BONES) {
-        if (!points[a] || !points[b]) continue;
-        ctx.beginPath();
-        ctx.moveTo(points[a].x, points[a].y);
-        ctx.lineTo(points[b].x, points[b].y);
-        ctx.stroke();
-      }
-      ctx.fillStyle = color;
-      for (const name of ["lw", "rw", "nose"]) {
-        if (!points[name]) continue;
-        ctx.beginPath();
-        ctx.arc(points[name].x, points[name].y, name === "nose" ? 9 : 6, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-    },
-
     getDrill() {
       const target = 1;
       return {
@@ -437,18 +297,7 @@ export function createCopyPose() {
   };
 }
 
-// A pose is only usable if the landmarks the checks depend on are actually
-// visible; a half-occluded player otherwise produces confident nonsense.
-function isUsable(pose) {
-  for (const index of [IDX.ls, IDX.rs, IDX.lh, IDX.rh]) {
-    const landmark = pose[index];
-    if (!landmark) return false;
-    if (landmark.visibility !== undefined && landmark.visibility < MIN_VISIBILITY) return false;
-  }
-  return true;
-}
-
-function createPlayer(anchor) {
+function createPlayer() {
   return {
     score: 0,
     misses: 0,
@@ -459,39 +308,6 @@ function createPlayer(anchor) {
     matched: false,
     flashT: 0,
     winT: 0,
-    anchor,                 // smoothed screen-space centre of this player
     current: POSES[Math.floor(Math.random() * POSES.length)],
   };
-}
-
-// The target the player must copy: a stick figure inside a bevelled plate.
-function drawTarget(ctx, cx, cy, s, player) {
-  const { la, ra } = player.current.arms;
-  const hit = player.matched;
-  const stroke = hit ? C.p1 : "#ffffff";
-
-  ctx.save();
-  ctx.strokeStyle = stroke;
-  ctx.lineWidth = 4;
-  ctx.lineCap = "round";
-  ctx.shadowColor = stroke;
-  ctx.shadowBlur = hit ? 18 : 10;
-
-  ctx.beginPath();
-  ctx.arc(cx, cy - s * 1.6, s * 0.35, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - s * 1.25);
-  ctx.lineTo(cx, cy);
-  ctx.moveTo(cx, cy - s);
-  ctx.lineTo(cx - Math.cos(la) * s, cy - s + Math.sin(la) * s);
-  ctx.moveTo(cx, cy - s);
-  ctx.lineTo(cx + Math.cos(ra) * s, cy - s + Math.sin(ra) * s);
-  ctx.moveTo(cx, cy);
-  ctx.lineTo(cx - s * 0.5, cy + s);
-  ctx.moveTo(cx, cy);
-  ctx.lineTo(cx + s * 0.5, cy + s);
-  ctx.stroke();
-  ctx.restore();
 }

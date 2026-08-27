@@ -233,7 +233,123 @@ const RENDERERS = {
       ctx.restore();
     });
   },
+  // Signal flicking between green and red while a marker climbs.
+  freezeframe(ctx, w, h, t) {
+    const red = (t % 3.2) > 1.9;
+    ctx.save();
+    ctx.fillStyle = red ? "rgba(255,77,77,0.16)" : "rgba(34,230,200,0.14)";
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = red ? C.danger : C.p1;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = ctx.strokeStyle;
+    ctx.shadowBlur = 8;
+    ctx.strokeRect(1.5, 1.5, w - 3, h - 3);
+    ctx.restore();
+    const climb = red ? 0.55 : 0.25 + ((t % 3.2) / 1.9) * 0.35;
+    for (const [x, col] of [[0.3, C.p1], [0.7, C.p2]]) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,255,255,0.16)";
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(x * w, h * 0.86); ctx.lineTo(x * w, h * 0.16); ctx.stroke();
+      ctx.strokeStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 7;
+      ctx.beginPath(); ctx.moveTo(x * w, h * 0.86);
+      ctx.lineTo(x * w, h * 0.86 - (h * 0.7) * (x < 0.5 ? climb : climb * 0.75));
+      ctx.stroke();
+      ctx.restore();
+    }
+  },
+
+  // A wall with a gap sweeping down past a figure.
+  beamdodge(ctx, w, h, t) {
+    const y = ((t * 0.55) % 1) * h;
+    const gapX = w * (0.3 + 0.4 * Math.sin(t * 0.9));
+    const gapW = w * 0.26;
+    ctx.save();
+    ctx.fillStyle = "rgba(255,77,77,0.6)";
+    ctx.shadowColor = C.danger;
+    ctx.shadowBlur = 8;
+    ctx.fillRect(0, y - 3, Math.max(0, gapX - gapW / 2), 6);
+    ctx.fillRect(gapX + gapW / 2, y - 3, Math.max(0, w - gapX - gapW / 2), 6);
+    ctx.restore();
+    stick(ctx, gapX, h * 0.72, h * 0.16, C.p1);
+  },
+
+  // A knot dragged back and forth along a rope.
+  tugofwar(ctx, w, h, t) {
+    const pull = Math.sin(t * 1.5) * 0.32;
+    const knot = w * (0.5 + pull);
+    ctx.save();
+    ctx.strokeStyle = "rgba(190,170,130,0.85)";
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(w * 0.05, h / 2);
+    ctx.quadraticCurveTo((w * 0.05 + knot) / 2, h / 2 + 5, knot, h / 2);
+    ctx.quadraticCurveTo((w * 0.95 + knot) / 2, h / 2 + 5, w * 0.95, h / 2);
+    ctx.stroke();
+    const col = pull < 0 ? C.p1 : C.p2;
+    ctx.strokeStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 10; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(knot, h / 2, 7, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    divider(ctx, w, h);
+  },
+
+  // Two figures locking in together, tumblers filling.
+  vaultsync(ctx, w, h, t) {
+    const cycle = t % 3;
+    const synced = cycle > 1.4;
+    const poses = [[-0.9, -0.9], [0, 0]];
+    stick(ctx, w * 0.22, h * 0.66, h * 0.15, synced ? C.p1 : "rgba(255,255,255,0.6)", poses[0]);
+    stick(ctx, w * 0.78, h * 0.66, h * 0.15, synced ? C.p1 : "rgba(255,255,255,0.6)", poses[1]);
+    const r = h * 0.2;
+    const progress = synced ? Math.min(1, (cycle - 1.4) / 1.2) : 0;
+    ctx.save();
+    ctx.translate(w / 2, h * 0.5);
+    ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = C.amber; ctx.shadowColor = C.amber; ctx.shadowBlur = 10; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(0, 0, r, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  },
+
+  // A sequence of poses flashing by, then pips filling in.
+  echo(ctx, w, h, t) {
+    const seq = [[-0.9, -0.9], [0, 0], [0.9, -0.9], [-1.6, -1.6]];
+    const step = Math.floor((t * 1.6) % (seq.length + 1));
+    if (step < seq.length) {
+      stick(ctx, w / 2, h * 0.62, h * 0.19, C.amber, seq[step]);
+    }
+    const spacing = w * 0.09;
+    const startX = w / 2 - (spacing * (seq.length - 1)) / 2;
+    for (let i = 0; i < seq.length; i++) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(startX + i * spacing, h * 0.9, 3, 0, Math.PI * 2);
+      ctx.fillStyle = i <= step ? C.amber : "rgba(255,255,255,0.2)";
+      ctx.fill();
+      ctx.restore();
+    }
+  },
 };
+
+function stick(ctx, cx, cy, s, color, arms = [-0.9, -0.9]) {
+  const [la, ra] = arms;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 7;
+  ctx.lineWidth = 1.8;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.arc(cx, cy - s * 1.6, s * 0.34, 0, Math.PI * 2);
+  ctx.moveTo(cx, cy - s * 1.26); ctx.lineTo(cx, cy);
+  ctx.moveTo(cx, cy - s); ctx.lineTo(cx - Math.cos(la) * s, cy - s + Math.sin(la) * s);
+  ctx.moveTo(cx, cy - s); ctx.lineTo(cx + Math.cos(ra) * s, cy - s + Math.sin(ra) * s);
+  ctx.moveTo(cx, cy); ctx.lineTo(cx - s * 0.5, cy + s * 0.9);
+  ctx.moveTo(cx, cy); ctx.lineTo(cx + s * 0.5, cy + s * 0.9);
+  ctx.stroke();
+  ctx.restore();
+}
 
 function divider(ctx, w, h) {
   ctx.save();

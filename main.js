@@ -4,6 +4,11 @@ import { createWhackAMole } from "./whackAMole.js";
 import { createCopyPose } from "./copyPose.js";
 import { createIceBreaker } from "./iceBreaker.js";
 import { createHullBreach } from "./hullBreach.js";
+import { createFreezeFrame } from "./freezeFrame.js";
+import { createBeamDodge } from "./beamDodge.js";
+import { createTugOfWar } from "./tugOfWar.js";
+import { createVaultSync } from "./vaultSync.js";
+import { createEcho } from "./echoGame.js";
 import { mountPreview, startPreviews, stopPreviews, measurePreviews } from "./previews.js";
 import { sfx, unlock, isMuted, setMuted } from "./audio.js";
 import { pickRandom, toCanvasPoint } from "./utils.js";
@@ -24,7 +29,10 @@ import { C } from "./theme.js";
    crisp and consistent across all four channels.
    ═══════════════════════════════════════════════════════════════════ */
 
-const GAMES = [createSignalPop, createWhackAMole, createCopyPose, createIceBreaker, createHullBreach];
+const GAMES = [
+  createSignalPop, createWhackAMole, createCopyPose, createIceBreaker, createHullBreach,
+  createFreezeFrame, createBeamDodge, createTugOfWar, createVaultSync, createEcho,
+];
 
 // Metadata is stable, so build it once instead of re-instantiating games.
 const META = GAMES.map((factory) => factory());
@@ -174,7 +182,10 @@ function layout() {
 
 /* ── Menu ────────────────────────────────────────────────────────── */
 function buildMenu() {
-  const accents = ["var(--p1)", "var(--p2)", "var(--violet)", "var(--ice)", "var(--amber)"];
+  const accents = [
+  "var(--p1)", "var(--p2)", "var(--violet)", "var(--ice)", "var(--amber)",
+  "var(--danger)", "var(--amber)", "var(--p2)", "var(--violet)", "var(--ice)",
+];
   GAMES.forEach((factory, index) => {
     const meta = META[index];
     const card = document.createElement("button");
