@@ -6,6 +6,13 @@
 import { C } from "./theme.js";
 
 const mounted = [];
+
+// JS modulo keeps the sign, so `-1 % 4` is -1 and arr[-1] is undefined.
+// Every time-derived index goes through here.
+const wrap = (n, length) => {
+  if (!Number.isFinite(n) || length <= 0) return 0;
+  return ((Math.floor(n) % length) + length) % length;
+};
 let raf = null;
 let startedAt = 0;
 let activeGroup = "menu";
@@ -37,13 +44,21 @@ export function measurePreviews() {
 export function startPreviews(group = "menu") {
   activeGroup = group;
   if (raf !== null) return;
-  startedAt = performance.now();
+  // Take the epoch from the first frame's own timestamp rather than from
+  // performance.now(). They share a time origin but not an instant: a rAF
+  // timestamp is the START of the frame, which can precede a
+  // performance.now() call that just ran. That made `t` negative on the
+  // first frame in Chrome (Windows/Android) while iOS Safari happened to
+  // return a later value — and a negative t produced a negative array
+  // index, because JS modulo keeps the sign.
+  startedAt = 0;
   let last = 0;
   const loop = (now) => {
     raf = requestAnimationFrame(loop);
+    if (startedAt === 0) startedAt = now;
     if (now - last < 45) return;          // ~22fps is plenty, and cheap
     last = now;
-    const t = (now - startedAt) / 1000;
+    const t = Math.max(0, (now - startedAt) / 1000);
     for (const entry of mounted) {
       if (entry.group !== activeGroup) continue;
       if (entry.w === 0) measure(entry);
@@ -98,7 +113,7 @@ const RENDERERS = {
   // Moles pop out of a row of holes in sequence.
   whackamole(ctx, w, h, t) {
     const count = 4;
-    const active = Math.floor(t * 1.6) % count;
+    const active = wrap(t * 1.6, count);
     const phase = (t * 1.6) % 1;
     for (let i = 0; i < count; i++) {
       const cx = w * ((i + 0.5) / count);
@@ -131,7 +146,7 @@ const RENDERERS = {
   // A stick figure cycling through the four target poses.
   copypose(ctx, w, h, t) {
     const poses = [[-0.9, -0.9], [0, 0], [0.9, -0.9], [-1.6, -1.6]];
-    const index = Math.floor(t / 1.1) % poses.length;
+    const index = wrap(t / 1.1, poses.length);
     const [la, ra] = poses[index];
     const s = h * 0.2;
     const cx = w / 2;
@@ -164,7 +179,7 @@ const RENDERERS = {
     const cols = 6;
     const rows = 2;
     const total = cols * rows;
-    const cleared = Math.floor((t * 2.4) % (total + 3));
+    const cleared = wrap(t * 2.4, total + 3);
     const padX = 3;
     const padY = 3;
     const bw = (w - padX * (cols + 1)) / cols;
@@ -315,8 +330,8 @@ const RENDERERS = {
   // A sequence of poses flashing by, then pips filling in.
   echo(ctx, w, h, t) {
     const seq = [[-0.9, -0.9], [0, 0], [0.9, -0.9], [-1.6, -1.6]];
-    const step = Math.floor((t * 1.6) % (seq.length + 1));
-    if (step < seq.length) {
+    const step = wrap(t * 1.6, seq.length + 1);
+    if (step < seq.length && seq[step]) {
       stick(ctx, w / 2, h * 0.62, h * 0.19, C.amber, seq[step]);
     }
     const spacing = w * 0.09;
@@ -332,8 +347,8 @@ const RENDERERS = {
   },
 };
 
-function stick(ctx, cx, cy, s, color, arms = [-0.9, -0.9]) {
-  const [la, ra] = arms;
+function stick(ctx, cx, cy, s, color, arms) {
+  const [la, ra] = Array.isArray(arms) ? arms : [-0.9, -0.9];
   ctx.save();
   ctx.strokeStyle = color;
   ctx.shadowColor = color;

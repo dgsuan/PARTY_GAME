@@ -630,7 +630,10 @@ function detect(timestampMs) {
 
 function tick(now) {
   rafId = requestAnimationFrame(tick);
-  const dt = Math.min((now - lastFrameTime) / 1000, 0.05);
+  // rAF timestamps and performance.now() share an origin but not an
+  // instant, so the first frame after a (re)start can produce a negative
+  // delta. Clamping at both ends keeps every timer moving forwards.
+  const dt = Math.max(0, Math.min((now - lastFrameTime) / 1000, 0.05));
   lastFrameTime = now;
 
   try {
