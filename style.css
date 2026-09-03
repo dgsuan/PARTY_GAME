@@ -295,6 +295,18 @@ body::after {
   mix-blend-mode: multiply;
 }
 
+/* ── Performance mode ────────────────────────────────────────────────
+   Set from main.js when the frame rate will not hold. Everything switched
+   off here is per-frame, full-viewport compositing work over a live video:
+   a filter pass on every decoded camera frame, two blend-mode layers the
+   compositor cannot flatten away, and a transform animating forever. On a
+   machine doing this in software they cost more than the game does.
+   ─────────────────────────────────────────────────────────────────── */
+.perf-low #webcam { filter: none; }
+.perf-low .video-grade,
+.perf-low .grain,
+.perf-low .sweep { display: none; }
+
 /* HUD-style corner brackets on the viewport itself. */
 .frame-brackets i {
   position: absolute;

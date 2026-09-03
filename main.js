@@ -61,6 +61,18 @@ const toast = $("toast");
 
 const view = { width: 1, height: 1, videoWidth: 0, videoHeight: 0 };
 
+/* ── Adaptive quality ────────────────────────────────────────────────
+   The camera grade, the grain and the sweep are full-viewport compositing
+   work on every frame, and a HiDPI canvas is up to four times the pixels to
+   clear and redraw. All of it is free on a machine with GPU acceleration and
+   ruinous on one without. Rather than pick a side, measure: if the frame
+   rate sits on the floor, drop the decoration and render 1:1.
+   ─────────────────────────────────────────────────────────────────── */
+const PERF_LOW_FPS = 20;
+const PERF_GRACE_MS = 3000;   // sustained, so a slow first second never trips it
+let perfLow = false;
+let perfBadSince = 0;
+
 let state = "menu";           // menu | loading | warmup | countdown | playing | paused | over | error
 let cards = [];
 let cursor = 0;
@@ -172,7 +184,9 @@ function syncVideoSize() {
 function layout() {
   syncVideoSize();
   const rect = canvas.getBoundingClientRect();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  // Performance mode renders the canvas 1:1 with CSS pixels. On a 1.5x
+  // display that is less than half the pixels to clear and redraw a frame.
+  const dpr = perfLow ? 1 : Math.min(window.devicePixelRatio || 1, 2);
   view.width = Math.max(1, Math.round(rect.width));
   view.height = Math.max(1, Math.round(rect.height));
   canvas.width = Math.round(view.width * dpr);
@@ -788,6 +802,7 @@ function measureFps(now) {
   fpsLastReport = now;
   const fps = fpsSamples.length;
   $("fpsValue").textContent = String(fps);
+  considerPerfMode(fps, now);
   const bar = fpsBars.shift();
   if (bar) {
     bar.style.height = `${Math.max(2, Math.min(12, (fps / 60) * 12))}px`;
@@ -796,6 +811,24 @@ function measureFps(now) {
     $("fpsBars").appendChild(bar);
     fpsBars.push(bar);
   }
+}
+
+// Only judged mid-match, where the frame rate is steady state — a model
+// still loading or a screen still animating in proves nothing.
+function considerPerfMode(fps, now) {
+  if (perfLow) return;
+  if (state !== "playing" && state !== "warmup") { perfBadSince = 0; return; }
+  if (fps >= PERF_LOW_FPS) { perfBadSince = 0; return; }
+  if (perfBadSince === 0) { perfBadSince = now; return; }
+  if (now - perfBadSince >= PERF_GRACE_MS) enablePerfMode();
+}
+
+function enablePerfMode() {
+  perfLow = true;
+  document.body.classList.add("perf-low");
+  layout();                        // re-cut the canvas at 1x
+  currentGame?.onResize?.(view);   // geometry is baked from the view, not scaled
+  flash("LOW FRAME RATE — VISUAL EFFECTS REDUCED", 3600);
 }
 
 /* ── End of match ────────────────────────────────────────────────── */
