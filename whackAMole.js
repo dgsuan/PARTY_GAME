@@ -1,4 +1,4 @@
-import { toCanvasPoint, dist, drawHammer, createFx, createShake } from "./utils.js";
+import { toCanvasPoint, palmCenter, dist, drawHammer, createFx, createShake } from "./utils.js";
 import { C, drawDivider } from "./theme.js";
 import { sfx } from "./audio.js";
 import { BASE_SPAWN_INTERVAL } from "./balance.js";
@@ -77,10 +77,14 @@ export function createWhackAMole() {
     onResults(hands) {
       this.hands = [[], []];
       for (const landmarks of hands) {
-        const point = toCanvasPoint(landmarks[8], this.view);
-        // Track the wrist too, so we can tell a swing from a hover.
+        // The palm, not a fingertip: players close their hands to swing, and
+        // a curled index finger takes its landmark with it.
+        const point = toCanvasPoint(palmCenter(landmarks), this.view);
+        // Track the wrist too, so we can tell a swing from a hover. The
+        // palm sits about half as far from the wrist as a fingertip did, so
+        // the wind-up range is scaled to match.
         const wrist = toCanvasPoint(landmarks[0], this.view);
-        point.swing = Math.max(0, Math.min(1, (point.y - wrist.y + 60) / 120));
+        point.swing = Math.max(0, Math.min(1, (point.y - wrist.y + 30) / 60));
         this.hands[point.x < this.view.width / 2 ? 0 : 1].push(point);
       }
     },

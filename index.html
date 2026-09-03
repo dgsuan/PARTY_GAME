@@ -242,6 +242,12 @@
         <span class="meter-label">SUBJECTS</span>
         <span id="subjValue" class="meter-value">0</span>
       </div>
+      <!-- Which delegate the tracker got. CPU here is the difference between
+           a smooth match and a slideshow, so it is worth a permanent slot. -->
+      <div class="meter" title="Tracking backend — CPU means hardware acceleration is unavailable">
+        <span class="meter-label">TRACKER</span>
+        <span id="delegateValue" class="meter-value">—</span>
+      </div>
       <div class="meter meter-grow">
         <span class="meter-label">SESSION</span>
         <span id="clockValue" class="meter-value">00:00</span>

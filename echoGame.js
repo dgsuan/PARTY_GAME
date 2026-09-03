@@ -46,7 +46,6 @@ export function createEcho() {
       this.phase = "show";       // show | answer | reveal
       this.showIndex = 0;
       this.showT = 0;
-      this.answerT = 0;
       this.revealT = 0;
       this.elapsed = 0;
       this.fx = createFx();
@@ -77,7 +76,7 @@ export function createEcho() {
       this.showIndex = 0;
       this.showT = 0;
       for (const player of this.players) {
-        if (!player.out) { player.step = 0; player.holdT = 0; player.lastMatch = null; }
+        if (!player.out) { player.step = 0; player.holdT = 0; player.answerT = ANSWER_TIME; }
       }
     },
 
@@ -106,7 +105,7 @@ export function createEcho() {
           this.showIndex += 1;
           if (this.showIndex >= this.sequence.length) {
             this.phase = "answer";
-            this.answerT = ANSWER_TIME;
+            for (const player of this.players) player.answerT = ANSWER_TIME;
             sfx.go();
           } else {
             sfx.count();
@@ -127,12 +126,18 @@ export function createEcho() {
         return;
       }
 
-      // Answering
-      this.answerT -= dt;
-      const expired = this.answerT <= 0;
+      /* Answering — each player runs their own clock.
 
+         It used to be one shared timer, reset by whichever player last
+         advanced a pose. So the moment one player finished their sequence
+         they stopped feeding it, and the other was left racing out whatever
+         their rival had happened to leave on it — usually a fraction of a
+         real budget, and usually fatal. It read as "P2 never gets detected"
+         when P2 was being tracked perfectly and simply ran out of someone
+         else's time. */
       for (const [index, player] of this.players.entries()) {
         if (player.out || player.step >= this.sequence.length) continue;
+        player.answerT -= dt;
 
         const want = this.sequence[player.step];
         // Poses are not mutually exclusive (hands-on-head also reads as
@@ -155,7 +160,7 @@ export function createEcho() {
               player.cleared += 1;
               this.fx.text(this.laneX(index), this.view.height * 0.4, "ECHOED", index === 0 ? C.p1 : C.p2);
             } else {
-              this.answerT = ANSWER_TIME;   // fresh budget for the next pose
+              player.answerT = ANSWER_TIME;   // fresh budget for the next pose
             }
           }
         } else if (wrong && !this.practice) {
@@ -169,13 +174,18 @@ export function createEcho() {
         }
       }
 
-      const everyoneDone = this.livePlayers().every((player) => player.step >= this.sequence.length);
-      if (expired && !this.practice) {
+      // A player who runs their own clock out is the only one it costs.
+      if (!this.practice) {
         for (const [index, player] of this.players.entries()) {
-          if (!player.out && player.step < this.sequence.length) this.fail(player, index);
+          if (!player.out && player.step < this.sequence.length && player.answerT <= 0) {
+            this.fail(player, index);
+          }
         }
       }
-      if (everyoneDone || expired) {
+
+      const stillAnswering = this.livePlayers()
+        .some((player) => player.step < this.sequence.length && player.answerT > 0);
+      if (!stillAnswering) {
         this.phase = "reveal";
         this.revealT = 1.3;
         if (this.practice && this.drill[0] && this.drill[1]) this.revealT = 0.1;
@@ -353,7 +363,15 @@ export function createEcho() {
       };
     },
 
+    // The shared dial shows the round's remaining window: the longest clock
+    // still running, since the round lasts until the last player is done.
+    answerLeft() {
+      const live = this.livePlayers().filter((player) => player.step < this.sequence.length);
+      return live.length ? Math.max(...live.map((player) => player.answerT)) : 0;
+    },
+
     getHud() {
+      const answerLeft = this.answerLeft();
       const pod = (side) => {
         const player = this.players[side];
         return {
@@ -368,8 +386,8 @@ export function createEcho() {
         center: {
           value: this.sequence.length,
           label: this.phase === "show" ? "WATCH" : this.phase === "answer" ? "REPEAT" : `ROUND ${this.round}`,
-          ratio: this.phase === "answer" ? clamp(this.answerT / ANSWER_TIME, 0, 1) : 1,
-          danger: this.phase === "answer" && this.answerT < 2,
+          ratio: this.phase === "answer" ? clamp(answerLeft / ANSWER_TIME, 0, 1) : 1,
+          danger: this.phase === "answer" && answerLeft < 2,
         },
       };
     },
@@ -399,7 +417,7 @@ export function createEcho() {
 
 function createMind() {
   return {
-    step: 0, cleared: 0, depth: 0, holdT: 0, out: false,
+    step: 0, cleared: 0, depth: 0, holdT: 0, answerT: ANSWER_TIME, out: false,
     flashT: 0, winT: 0, tracked: false, landmarks: null, points: null, unit: 0,
   };
 }

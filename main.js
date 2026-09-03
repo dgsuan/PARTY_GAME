@@ -11,7 +11,7 @@ import { createVaultSync } from "./vaultSync.js";
 import { createEcho } from "./echoGame.js";
 import { mountPreview, startPreviews, stopPreviews, measurePreviews } from "./previews.js";
 import { sfx, unlock, isMuted, setMuted } from "./audio.js";
-import { pickRandom, toCanvasPoint } from "./utils.js";
+import { pickRandom, toCanvasPoint, palmCenter } from "./utils.js";
 import { C } from "./theme.js";
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -249,8 +249,19 @@ function cameraLive() {
 
 async function startCamera() {
   if (cameraLive()) return;
+  /* 540p at 30fps, not 720p at whatever the camera offers. The tracking
+     models downscale to their own fixed input either way, so the extra
+     pixels buy no accuracy — they only cost decode, upload and the CSS
+     grade, every frame. The frame-rate cap matters just as much: detection
+     runs once per *new camera frame*, so a 60fps webcam quietly doubles the
+     inference bill for nothing. */
   cameraStream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+    video: {
+      facingMode: "user",
+      width: { ideal: 960 },
+      height: { ideal: 540 },
+      frameRate: { ideal: 30, max: 30 },
+    },
     audio: false,
   });
   video.srcObject = cameraStream;
@@ -311,14 +322,21 @@ async function getLandmarker(game) {
   let instance;
   try {
     instance = await build("GPU");
+    setDelegate("GPU");
   } catch (error) {
     console.warn("GPU delegate unavailable, falling back to CPU", error);
     instance = await build("CPU");
+    setDelegate("CPU");
     flash("GPU UNAVAILABLE — RUNNING ON CPU", 3200);
   }
 
   landmarkers.set(key, instance);
   return instance;
+}
+
+function setDelegate(value) {
+  $("delegateValue").textContent = value;
+  $("delegateValue").style.color = value === "CPU" ? "var(--danger)" : "";
 }
 
 function setStep(el, value) { el.dataset.state = value; }
@@ -420,8 +438,8 @@ function detectPresence() {
     }
   } else {
     for (const hand of lastResults) {
-      if (!hand[8]) continue;
-      const point = toCanvasPoint(hand[8], view);
+      if (!hand[0]) continue;
+      const point = toCanvasPoint(palmCenter(hand), view);
       found[point.x < view.width / 2 ? 0 : 1] = true;
     }
   }

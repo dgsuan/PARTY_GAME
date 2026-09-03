@@ -15,6 +15,10 @@ const START_SPEED = 0.141;  // 7.1s per pose — was 0.11 (9.1s), so -2s
 const SPEED_STEP = 0.018;   // added per successful pose
 const HOLD_TIME = 0.35;     // seconds a pose must be held to count
 const MIRROR_CHANCE = 0.5;  // chance an asymmetric pose is flipped
+// The warm-up wall used to be frozen outright, which just looked broken —
+// the target sat pinned to the top of the screen. It now drifts down slowly
+// enough that there is no pressure, but the mechanic is visible.
+const PRACTICE_SPEED = 0.055;   // ~18s to cross
 
 // Copy the Pose draws on a much wider pool than the other pose channels.
 // Kept local so Echo and Vault Sync are untouched by the expansion.
@@ -49,12 +53,12 @@ export function createCopyPose() {
       this.drill = [0, 0];
       this.players = [createPlayer(), createPlayer()];
       this.tracker = createPoseTracker();
-      // The warm-up freezes the wall: learn the pose without the pressure.
+      // The warm-up crawls the wall: learn the pose without the pressure.
       // It also opens on ARMS UP, the easiest pose to perform and the one
       // the tracker reads most reliably.
       if (practice) {
         for (const player of this.players) {
-          player.speed = 0;
+          player.speed = PRACTICE_SPEED;
           player.current = POSES[0];
         }
       }
@@ -127,7 +131,9 @@ export function createCopyPose() {
           player.flashT = 0.35;
           player.progress = 0;
           player.holdTimer = 0;
-          player.speed = Math.max(START_SPEED, player.speed - SPEED_STEP);
+          player.speed = this.practice
+            ? PRACTICE_SPEED
+            : Math.max(START_SPEED, player.speed - SPEED_STEP);
           player.current = dealPose(player.current);
           sfx.fail();
         }

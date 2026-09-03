@@ -74,10 +74,15 @@ export function createBeamDodge() {
       sfx.leak();
     },
 
-    // Screen-space points for the body parts a beam can catch.
+    /* Screen-space points for the body parts a beam can catch.
+
+       The head is deliberately not one of them. The nose landmark is the
+       jumpiest point on the body and sits exactly where the low bars sweep,
+       so it produced hits players never felt they took. Torso and hands
+       decide it instead — a duck now means getting your shoulders under. */
     bodyPoints(player) {
       if (!player.landmarks) return null;
-      const wanted = [IDX.nose, IDX.ls, IDX.rs, IDX.lh, IDX.rh, IDX.lw, IDX.rw];
+      const wanted = [IDX.ls, IDX.rs, IDX.lh, IDX.rh, IDX.lw, IDX.rw];
       const points = [];
       for (const index of wanted) {
         const landmark = player.landmarks[index];

@@ -1,4 +1,4 @@
-import { toCanvasPoint, drawHammer, createFx, createShake } from "./utils.js";
+import { toCanvasPoint, palmCenter, drawHammer, createFx, createShake } from "./utils.js";
 import { C, drawDivider } from "./theme.js";
 import { sfx } from "./audio.js";
 
@@ -62,9 +62,10 @@ export function createIceBreaker() {
     onResults(hands) {
       this.hands = [[], []];
       for (const landmarks of hands) {
-        const point = toCanvasPoint(landmarks[8], this.view);
+        // The palm, not a fingertip — a closed hand still hammers.
+        const point = toCanvasPoint(palmCenter(landmarks), this.view);
         const wrist = toCanvasPoint(landmarks[0], this.view);
-        point.swing = Math.max(0, Math.min(1, (point.y - wrist.y + 60) / 120));
+        point.swing = Math.max(0, Math.min(1, (point.y - wrist.y + 30) / 60));
         this.hands[point.x < this.view.width / 2 ? 0 : 1].push(point);
       }
     },

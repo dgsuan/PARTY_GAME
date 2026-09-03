@@ -60,6 +60,17 @@ export function pickRandom(arr, exclude) {
   return choice;
 }
 
+// Centre of the palm (wrist + the four knuckle bases), in raw landmark
+// space. Unlike a fingertip this stays put whether the hand is open or
+// balled into a fist, so "hand becomes hammer" tracking doesn't fall apart
+// the moment a player clenches to swing.
+export function palmCenter(landmarks) {
+  const idx = [0, 5, 9, 13, 17];
+  let x = 0, y = 0;
+  for (const i of idx) { x += landmarks[i].x; y += landmarks[i].y; }
+  return { x: x / idx.length, y: y / idx.length };
+}
+
 // Cartoon hammer used as the "hands become hammers" cursor. `swing` (0-1)
 // drives the wind-up so a strike reads as a strike.
 export function drawHammer(ctx, x, y, color, swing = 0) {
@@ -142,13 +153,13 @@ export function createFx() {
     },
 
     draw(ctx) {
+      // No shadowBlur on particles: Canvas2D blur is a per-draw-call CPU
+      // convolution, and a burst puts a dozen of them on screen at once.
       for (const bit of bits) {
         const k = 1 - bit.life / bit.max;
         ctx.save();
         ctx.globalAlpha = Math.max(0, k);
         ctx.fillStyle = bit.color;
-        ctx.shadowColor = bit.color;
-        ctx.shadowBlur = 8;
         if (bit.shard) {
           ctx.translate(bit.x, bit.y);
           ctx.rotate(bit.angle);

@@ -15,7 +15,17 @@ export const BONES = [
   ["ls", "le"], ["le", "lw"], ["rs", "re"], ["re", "rw"],
 ];
 
-const MIN_VISIBILITY = 0.5;
+/* A pose whose landmarks are merely *less* confident is still a real
+   player. At 0.5 a second player standing further back, angled, or near the
+   edge of frame was being thrown away wholesale, which reads as "P2 isn't
+   detected". The gameplay checks tolerate a bit of noise, so it is better to
+   accept a softer detection than to drop the player entirely. */
+const MIN_VISIBILITY = 0.35;
+
+// Canvas2D shadow blur is a CPU-side convolution per draw call, so the glow
+// on a skeleton (8 bones + dots, every frame, per player) is one of the most
+// expensive things on screen. Cap it however loud a caller asks for.
+const MAX_GLOW = 12;
 
 /* Landmarks are normalised to the *frame*, so a player standing further
    away produces smaller deltas for the same gesture. One body unit ≈ the
@@ -152,7 +162,7 @@ export function drawSkeleton(ctx, landmarks, view, { color = "#fff", glow = 8, d
   ctx.save();
   ctx.strokeStyle = color;
   ctx.shadowColor = color;
-  ctx.shadowBlur = glow;
+  ctx.shadowBlur = Math.min(glow, MAX_GLOW);
   ctx.lineWidth = 3;
   ctx.lineCap = "round";
   for (const [a, b] of BONES) {
@@ -183,7 +193,7 @@ export function drawStickFigure(ctx, cx, cy, s, arms, color, glow = 10) {
   ctx.lineWidth = 4;
   ctx.lineCap = "round";
   ctx.shadowColor = color;
-  ctx.shadowBlur = glow;
+  ctx.shadowBlur = Math.min(glow, MAX_GLOW);
   ctx.beginPath();
   ctx.arc(cx, cy - s * 1.6, s * 0.35, 0, Math.PI * 2);
   ctx.stroke();
@@ -203,8 +213,23 @@ export function drawStickFigure(ctx, cx, cy, s, arms, color, glow = 10) {
 }
 
 /* Motion magnitude in body units per second — scale-invariant, so a
-   player at the back of the room is judged the same as one up close. */
+   player at the back of the room is judged the same as one up close.
+
+   The meter has to survive the tracker misplacing a joint for a frame. A
+   glitched landmark teleports across the body between two frames, which
+   reads as enormous motion and — in Freeze Frame — costs a player the round
+   for standing perfectly still. Two guards handle it:
+
+     · a joint that moved further than a human can in one frame is dropped
+       from that frame's average rather than dominating it
+     · if most joints glitch at once (the whole pose was misplaced), the
+       frame is skipped entirely instead of spiking the meter
+   ─────────────────────────────────────────────────────────────────── */
+const JOINT_JUMP_LIMIT = 0.45;   // body units, per frame — beyond this is the tracker, not the player
+const MIN_GOOD_JOINTS = 4;       // of 7; fewer means the pose itself moved, not the player
+
 export function createMotionMeter(smoothing = 0.35) {
+  const JOINTS = ["nose", "ls", "rs", "lw", "rw", "lh", "rh"];
   let previous = null;
   let value = 0;
   return {
@@ -215,14 +240,17 @@ export function createMotionMeter(smoothing = 0.35) {
       if (previous) {
         const unit = bodyUnit(points);
         let sum = 0;
-        let count = 0;
-        for (const name of ["nose", "ls", "rs", "lw", "rw", "lh", "rh"]) {
+        let good = 0;
+        for (const name of JOINTS) {
           if (!previous[name]) continue;
-          sum += gap(points[name], previous[name]);
-          count++;
+          const moved = gap(points[name], previous[name]) / unit;
+          if (moved > JOINT_JUMP_LIMIT) continue;
+          sum += moved;
+          good++;
         }
-        const raw = count ? (sum / count) / unit / dt : 0;
-        value = lerp(value, raw, smoothing);
+        // Enough joints read plausibly? Trust the frame. Otherwise leave the
+        // meter where it was and wait for a clean one.
+        if (good >= MIN_GOOD_JOINTS) value = lerp(value, (sum / good) / dt, smoothing);
       }
       previous = points;
       return value;
